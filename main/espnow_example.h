@@ -23,6 +23,12 @@
 
 #define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
 
+// CUSTOM USER DEFINES 
+#define FIELD_LENGTH 8 // This is the length of the electrode array
+#define FIELD_WIDTH 2 // This is the width of the electrode array
+
+// CUSTOM USER DEFINES 
+
 typedef enum {
     EXAMPLE_ESPNOW_SEND_CB,
     EXAMPLE_ESPNOW_RECV_CB,
@@ -78,5 +84,21 @@ typedef struct {
     uint8_t *buffer;                      //Buffer pointing to ESPNOW data.
     uint8_t dest_mac[ESP_NOW_ETH_ALEN];   //MAC address of destination device.
 } example_espnow_send_param_t;
+
+typedef struct
+{
+    uint16_t data[FIELD_LENGTH * FIELD_WIDTH];
+    uint32_t data_checksum;
+
+} PACKED_ATTR espnow_data;
+
+
+typedef struct
+{
+    bool am_emitter;
+    uint8_t my_field_length;
+    uint8_t my_field_width;
+
+} handshake_data;
 
 #endif
