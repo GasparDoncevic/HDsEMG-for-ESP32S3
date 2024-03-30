@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "espnow_test",
-    "project_version":    "1",
+    "project_version":    "f950fb7-dirty",
     "project_path":       "E:/Repos/diplomski/espnow_test/espnow_test",
     "idf_path":           "C:/Users/Gaspar/esp/v5.2.1/esp-idf",
     "build_dir":          "E:/Repos/diplomski/espnow_test/espnow_test/build",
@@ -835,7 +835,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [ "espressif__esp-now" ],
             "file": "E:/Repos/diplomski/espnow_test/espnow_test/build/esp-idf/main/libmain.a",
-            "sources": [ "E:/Repos/diplomski/espnow_test/espnow_test/main/espnow_example_main.c" ],
+            "sources": [ "E:/Repos/diplomski/espnow_test/espnow_test/main/AFE_controll.c", "E:/Repos/diplomski/espnow_test/espnow_test/main/espnow_example_main.c" ],
             "include_dirs": [ "." ]
         },
         "mbedtls": {

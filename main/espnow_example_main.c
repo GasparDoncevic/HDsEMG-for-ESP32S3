@@ -6,7 +6,10 @@
    software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
    CONDITIONS OF ANY KIND, either express or implied.
 */
-
+//TODO:
+// Implement data copying from SRAM to datastructure for espnow data
+// refurbush data prep structure to contain only necessary data
+// Implement task which places HDSEMG data into espnow message queue
 /*
    This example shows how to use ESPNOW.
    Prepare two device, one for sending ESPNOW data and another for receiving
@@ -32,14 +35,30 @@
 
 #define ESPNOW_MAXDELAY 512
 
+//USER DEFINES
+#define  DEVICE_ROLE_SENDER 0
+#define  DEVICE_ROLE_RECIEVER 1
+#define  IMAGE_SIZE 16
+#define ESPNOW_SEND_TASK_PRIORITY 5
+#define ESPNOW_DATA_PREP_TASK_PRIORITY 4
+//USER DEFINES
 
 
+//USER PRIVATE VARIABLES
+TaskHandle_t espnow_send_data_taskHandle;
+TaskHandle_t espnow_data_prep_taskHandle;
+static QueueHandle_t image_queue;
+static const char *USER_TAG = "user_espnow";
+example_espnow_send_param_t *send_parameters = NULL;
+//USER PRIVATE VARIABLES
 static const char *TAG = "espnow_example";
 
 static QueueHandle_t s_example_espnow_queue;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 static uint16_t s_example_espnow_seq[EXAMPLE_ESPNOW_DATA_MAX] = { 0, 0 };
+static uint16_t s_image_data[IMAGE_SIZE] = {0xAA};
+static uint8_t device_role = DEVICE_ROLE_SENDER;
 
 static void example_espnow_deinit(example_espnow_send_param_t *send_param);
 
@@ -169,7 +188,7 @@ static void example_espnow_task(void *pvParameter)
     bool is_broadcast = false;
     int ret;
 
-    vTaskDelay(5000 / portTICK_PERIOD_MS);
+    vTaskDelay(50 / portTICK_PERIOD_MS);
     ESP_LOGI(TAG, "Start sending broadcast data");
 
     /* Start sending broadcast ESPNOW data. */
@@ -375,6 +394,124 @@ static void example_espnow_deinit(example_espnow_send_param_t *send_param)
     esp_now_deinit();
 }
 
+//BEGINING OF USER CODE
+static esp_err_t user_espnow_init(void)
+{
+    // This is now a global variable
+    //example_espnow_send_param_t *send_param;
+
+    s_example_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(example_espnow_event_t));
+    if (s_example_espnow_queue == NULL) {
+        ESP_LOGE(TAG, "Create mutex fail");
+        return ESP_FAIL;
+    }
+
+    /* Initialize ESPNOW and register sending and receiving callback function. */
+    ESP_ERROR_CHECK( esp_now_init() );
+    ESP_ERROR_CHECK( esp_now_register_send_cb(example_espnow_send_cb) );
+    ESP_ERROR_CHECK( esp_now_register_recv_cb(example_espnow_recv_cb) );
+#if CONFIG_ESPNOW_ENABLE_POWER_SAVE
+    ESP_ERROR_CHECK( esp_now_set_wake_window(CONFIG_ESPNOW_WAKE_WINDOW) );
+    ESP_ERROR_CHECK( esp_wifi_connectionless_module_set_wake_interval(CONFIG_ESPNOW_WAKE_INTERVAL) );
+#endif
+    /* Set primary master key. */
+    ESP_ERROR_CHECK( esp_now_set_pmk((uint8_t *)CONFIG_ESPNOW_PMK) );
+
+    /* Add broadcast peer information to peer list. */
+    esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
+    if (peer == NULL) {
+        ESP_LOGE(TAG, "Malloc peer information fail");
+        vSemaphoreDelete(s_example_espnow_queue);
+        esp_now_deinit();
+        return ESP_FAIL;
+    }
+    memset(peer, 0, sizeof(esp_now_peer_info_t));
+    peer->channel = CONFIG_ESPNOW_CHANNEL;
+    peer->ifidx = ESPNOW_WIFI_IF;
+    peer->encrypt = false;
+    memcpy(peer->peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
+    ESP_ERROR_CHECK( esp_now_add_peer(peer) );
+    free(peer);
+
+    /* Initialize sending parameters. */
+    send_parameters = malloc(sizeof(example_espnow_send_param_t));
+    if (send_parameters == NULL) {
+        ESP_LOGE(TAG, "Malloc send parameter fail");
+        vSemaphoreDelete(s_example_espnow_queue);
+        esp_now_deinit();
+        return ESP_FAIL;
+    }
+    memset(send_parameters, 0, sizeof(example_espnow_send_param_t));
+    send_parameters->unicast = false;
+    send_parameters->broadcast = true;
+    send_parameters->state = 0;
+    send_parameters->magic = device_role;
+    send_parameters->count = CONFIG_ESPNOW_SEND_COUNT;
+    send_parameters->delay = CONFIG_ESPNOW_SEND_DELAY;
+    send_parameters->len = CONFIG_ESPNOW_SEND_LEN;
+    send_parameters->buffer = malloc(CONFIG_ESPNOW_SEND_LEN);
+    if (send_parameters->buffer == NULL) {
+        ESP_LOGE(TAG, "Malloc send buffer fail");
+        free(send_parameters);
+        vSemaphoreDelete(s_example_espnow_queue);
+        esp_now_deinit();
+        return ESP_FAIL;
+    }
+    memcpy(send_parameters->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
+    //example_espnow_data_prepare(send_param);
+
+    //xTaskCreate(example_espnow_task, "example_espnow_task", 8048, send_parameters, 4, NULL);
+    return ESP_OK;
+}
+/* Prepare ESPNOW data to be sent. */
+//for now very similar to data structure to example code, just gutted the filler random numbers 
+// This funciton should be called only when message queue is empty which block data_send task
+// accesses memory location dedicated for ADC image data storage 
+//This task sends data to message queue which will be read by sending task
+void user_espnow_data_prep(void *pv_parameters)
+{
+    //example_espnow_send_param_t *send_param = NULL;
+    espnow_data *buf = send_parameters->buffer;
+    xQueueReceive(image_queue, buf->payload, portMAX_DELAY);
+
+    
+    assert(send_parameters->len >= sizeof(espnow_data));
+
+    buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
+    buf->state = send_parameters->state;
+    buf->seq_num = s_example_espnow_seq[buf->type]++;
+    buf->crc = 0;
+    buf->magic = send_parameters->magic;
+    // /* Fill all remaining bytes after the data with random values */
+    // esp_fill_random(buf->payload, send_param->len - sizeof(example_espnow_data_t));
+    buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
+
+    send_parameters->buffer = buf;
+    xQueueSend(s_example_espnow_queue, send_parameters, portMAX_DELAY);
+}
+//This task needs to dequeue messages containing image data and send it using esp_now_send
+void espnow_send_data_task(void *pv_parameters)
+{
+    example_espnow_send_param_t *send_param = NULL;
+    ESP_LOGE(USER_TAG ,"Taking data from queue");
+    xQueueReceive(s_example_espnow_queue, send_param, portMAX_DELAY);
+    ESP_LOGE(TAG ,"Sending image data via ESPNOW");
+    if (esp_now_send(send_param->dest_mac, send_param->buffer, sizeof(send_param->len)) != ESP_OK)
+    {
+        ESP_LOGE(USER_TAG, "Failed to send data to destination address");
+    }
+}
+
+// This function should be called from the main app and should initialize both the send and data prep tasks 
+void xinit_send_data_tasks()
+{
+    
+    example_espnow_send_param_t *pv_parameters = NULL;
+    xTaskCreatePinnedToCore(*espnow_send_data_task, "espnow_send_data_task", 4000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, espnow_send_data_taskHandle, 0);
+    xTaskCreatePinnedToCore(*user_espnow_data_prep, "espnow_data_prep_task", 4000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, espnow_data_prep_taskHandle, 0);
+    return;
+}
+
 void app_main(void)
 {
     // Initialize NVS
@@ -388,3 +525,4 @@ void app_main(void)
     example_wifi_init();
     example_espnow_init();
 }
+

@@ -87,9 +87,12 @@ typedef struct {
 
 typedef struct
 {
-    uint16_t data[FIELD_LENGTH * FIELD_WIDTH];
-    uint32_t data_checksum;
-
+    uint8_t type;                         //Broadcast or unicast ESPNOW data.
+    uint8_t state;                        //Indicate that if has received broadcast ESPNOW data or not.
+    uint16_t seq_num;                     //Sequence number of ESPNOW data.
+    uint16_t crc;                         //CRC16 value of ESPNOW data.
+    uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
+    uint16_t payload[FIELD_LENGTH * FIELD_WIDTH]; // data payload to be sent via espnow
 } PACKED_ATTR espnow_data;
 
 
