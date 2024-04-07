@@ -29,6 +29,11 @@
 
 // CUSTOM USER DEFINES 
 
+//USER Private functions
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status);
+static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len);
+//USER Private functions
+
 typedef enum {
     EXAMPLE_ESPNOW_SEND_CB,
     EXAMPLE_ESPNOW_RECV_CB,
@@ -103,5 +108,11 @@ typedef struct
     uint8_t my_field_width;
 
 } handshake_data;
+
+typedef struct
+{
+    uint8_t *data;
+    uint8_t len;
+} image_data_raw;
 
 #endif
