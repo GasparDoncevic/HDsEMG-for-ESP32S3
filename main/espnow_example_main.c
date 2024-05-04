@@ -622,8 +622,8 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
     for(;;)
     {   
         ESP_LOGI(USER_TAG, "data staging task: Generating new data");
-        image_data_raw *image = malloc(IMAGE_SIZE);
-        memset(&image, 0x0A0A, 8);
+        uint16_t *image = malloc(IMAGE_SIZE*2);
+        memset(image, 0x0A0A, 32);
         xQueueSend(queue_image, image, portMAX_DELAY);
         vTaskDelay(100/portTICK_PERIOD_MS);
     }
