@@ -48,12 +48,13 @@
 bool run_example = false;
 bool device_role = DEVICE_ROLE_SENDER;
 
-
 TaskHandle_t espnow_send_data_taskHandle = NULL;
 TaskHandle_t espnow_data_prep_taskHandle = NULL;
 TaskHandle_t TEST_espnow_stage_data_taskhandle = NULL;
-static QueueHandle_t image_queue = NULL; // queue for raw image data, between memory location and data prep task
-static QueueHandle_t espnow_com_queue = NULL; // queue for send data, between data prep task and send task
+TaskHandle_t init_tasks_handle = NULL;
+
+static QueueHandle_t queue_image = NULL; // queue for raw image data, between memory location and data prep task
+static QueueHandle_t queue_espnow_stage = NULL; // queue for send data, between data prep task and send task
 SemaphoreHandle_t semaphore_send = NULL;
 SemaphoreHandle_t semaphore_receive = NULL;
 
@@ -415,6 +416,17 @@ static esp_err_t user_espnow_init(void)
     xSemaphoreGive(semaphore_send);
     xSemaphoreGive(semaphore_receive);
 
+    if(semaphore_receive == NULL)
+    {
+        ESP_LOGE(USER_TAG, "Failed receive semaphore create");
+        return ESP_FAIL;
+    }
+    if(semaphore_send == NULL)
+    {
+        ESP_LOGE(USER_TAG, "Failed send semaphore create");
+        return ESP_FAIL;
+    }
+
     s_example_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(example_espnow_event_t));
     if (s_example_espnow_queue == NULL) {
         ESP_LOGE(TAG, "Create mutex fail");
@@ -452,6 +464,13 @@ static esp_err_t user_espnow_init(void)
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
     free(peer);
 
+    // Setting queues
+    ESP_LOGI(USER_TAG, "Size of espnow data: %d", sizeof(espnow_data));
+    queue_espnow_stage = xQueueCreate(30, sizeof(espnow_data));
+    queue_image = xQueueCreate(30, sizeof(image_data_raw));
+    
+    // Setting queues
+
     /* Initialize sending parameters. */
     send_parameters = malloc(sizeof(example_espnow_send_param_t));
     if (send_parameters == NULL) {
@@ -467,8 +486,8 @@ static esp_err_t user_espnow_init(void)
     send_parameters->magic = device_role;
     send_parameters->count = CONFIG_ESPNOW_SEND_COUNT;
     send_parameters->delay = CONFIG_ESPNOW_SEND_DELAY;
-    send_parameters->len = CONFIG_ESPNOW_SEND_LEN;
-    send_parameters->buffer = malloc(CONFIG_ESPNOW_SEND_LEN);
+    send_parameters->len = IMAGE_SIZE;
+    send_parameters->buffer = malloc(sizeof(espnow_data));
     if (send_parameters->buffer == NULL) {
         ESP_LOGE(TAG, "Malloc send buffer fail");
         free(send_parameters);
@@ -490,7 +509,7 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
 {
     // example_espnow_event_t evt;
     // example_espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
-
+    ESP_LOGI(USER_TAG, "Entered send callback function");
     if (mac_addr == NULL) {
         ESP_LOGE(TAG, "Send cb arg error");
         return;
@@ -502,12 +521,17 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     // if (xQueueSend(s_example_espnow_queue, &evt, ESPNOW_MAXDELAY) != pdTRUE) {
     //     ESP_LOGW(TAG, "Send send queue fail");
     // }
-    void * data_dump = NULL;
+    espnow_data *data_dump = NULL;
     if(status == ESP_NOW_SEND_SUCCESS)
     {
-        xQueueReceive(espnow_com_queue, data_dump, portMAX_DELAY);
+        ESP_LOGI(USER_TAG, "Removing successfully sent data from queue");
+        xQueueReceive(queue_espnow_stage, &data_dump, portMAX_DELAY);
+        ESP_LOGI(USER_TAG, "freeing sent data from memory");
+        free(&(data_dump->payload));
     }
+    ESP_LOGI(USER_TAG, "Giving back semaphore");
     xSemaphoreGive(semaphore_send);
+    ESP_LOGI(USER_TAG, "Exiting send callback function");
 }
 
 static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len)
@@ -537,7 +561,7 @@ static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_
     ESP_LOGD(USER_TAG, "stored received data locally and sending to queue");
     image_data.data = received_data;
     image_data.len = len;
-    xQueueSend(espnow_com_queue, &image_data, portMAX_DELAY);
+    xQueueSend(queue_espnow_stage, &image_data, portMAX_DELAY);
 }
 /* Prepare ESPNOW data to be sent. */
 //for now very similar to data structure to example code, just gutted the filler random numbers 
@@ -546,40 +570,47 @@ static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_
 //This task sends data to message queue which will be read by sending task
 void espnow_data_prep_task(void *pv_parameters)
 {
-    //example_espnow_send_param_t *send_param = NULL;
-    espnow_data *buf = send_parameters->buffer;
-    xQueueReceive(image_queue, buf->payload, portMAX_DELAY);
+    for(;;)
+    {
+        //example_espnow_send_param_t *send_param = NULL;
+        espnow_data *buf = send_parameters->buffer;
+        xQueueReceive(queue_image, buf->payload, portMAX_DELAY);
 
+        ESP_LOGI(USER_TAG, "size of send_parameters->len: %d", send_parameters->len);
+        ESP_LOGI(USER_TAG, "size of espnow_data: %d", sizeof(espnow_data));
+        assert(!(send_parameters->len >= sizeof(espnow_data)));
+        
+
+        buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
+        buf->state = send_parameters->state;
+        buf->seq_num = s_example_espnow_seq[buf->type]++;
+        buf->crc = 0;
+        buf->magic = send_parameters->magic;
+        // /* Fill all remaining bytes after the data with random values */
+        // esp_fill_random(buf->payload, send_param->len - sizeof(example_espnow_data_t));
+        buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
+
+        send_parameters->buffer = buf;
+        //is there a way to notify if the queue is full?
+        xQueueSend(queue_espnow_stage, send_parameters, portMAX_DELAY);
+        }
     
-    assert(send_parameters->len >= sizeof(espnow_data));
-
-    buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
-    buf->state = send_parameters->state;
-    buf->seq_num = s_example_espnow_seq[buf->type]++;
-    buf->crc = 0;
-    buf->magic = send_parameters->magic;
-    // /* Fill all remaining bytes after the data with random values */
-    // esp_fill_random(buf->payload, send_param->len - sizeof(example_espnow_data_t));
-    buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
-
-    send_parameters->buffer = buf;
-    //is there a way to notify if the queue is full?
-    xQueueSend(espnow_com_queue, send_parameters, portMAX_DELAY);
 }
 //This task needs to peek messages containing image data and send it using esp_now_send
 // Meggase data sould be dequeued in callback function
 void espnow_send_data_task(void *pv_parameters)
 {
-    example_espnow_send_param_t *send_param = NULL;
+
+    //example_espnow_send_param_t *send_param = NULL;
     for(;;)
     {
-        ESP_LOGD(USER_TAG ,"Taking taking send semaphore: send_data_task");
+        ESP_LOGI(USER_TAG ,"Taking send semaphore: send_data_task");
         xSemaphoreTake(semaphore_send, portMAX_DELAY);
-        ESP_LOGD(USER_TAG ,"Taking data from queue: send_data_task");
+        ESP_LOGI(USER_TAG ,"Taking data from queue: send_data_task");
     
-        xQueuePeek(espnow_com_queue, send_param, portMAX_DELAY);
-        ESP_LOGD(TAG ,"Sending image data via ESPNOW: send_data_task");
-        if (esp_now_send(send_param->dest_mac, send_param->buffer, sizeof(send_param->len)) != ESP_OK)
+        xQueuePeek(queue_espnow_stage, send_parameters, portMAX_DELAY);
+        ESP_LOGI(USER_TAG ,"Sending image data via ESPNOW: send_data_task");
+        if (esp_now_send(send_parameters->dest_mac, &(send_parameters->buffer), sizeof(send_parameters->len)) != ESP_OK)
         {
             ESP_LOGE(USER_TAG, "Failed to send data to destination address: send_data_task");
         }
@@ -591,19 +622,41 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
     for(;;)
     {   
         ESP_LOGI(USER_TAG, "data staging task: Generating new data");
-        xQueueSend(image_queue, s_image_data, portMAX_DELAY);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        image_data_raw *image = malloc(IMAGE_SIZE);
+        memset(&image, 0x0A0A, 8);
+        xQueueSend(queue_image, image, portMAX_DELAY);
+        vTaskDelay(100/portTICK_PERIOD_MS);
     }
 }
 
 // This function should be called from the main app and should initialize both the send and data prep tasks 
 void xinit_send_data_tasks()
 {
-    
+
+    uint8_t task_count = 0;
     example_espnow_send_param_t *pv_parameters = NULL;
-    xTaskCreatePinnedToCore(*espnow_send_data_task, "espnow_send_data_task", 4000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, espnow_send_data_taskHandle, 0);
-    xTaskCreatePinnedToCore(*espnow_data_prep_task, "espnow_data_prep_task", 4000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, espnow_data_prep_taskHandle, 0);
-    xTaskCreatePinnedToCore(*TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 2000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY,TEST_espnow_stage_data_taskhandle, 0);
+    if(xTaskCreatePinnedToCore(&espnow_send_data_task, "espnow_send_data_task", 8000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
+    if(xTaskCreatePinnedToCore(&espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
+    if(xTaskCreatePinnedToCore(&TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, 6, &TEST_espnow_stage_data_taskhandle, 0) == pdPASS) task_count++;
+    if(task_count == 3)
+    {
+        ESP_LOGI(USER_TAG, "All tasks were created successfully!");
+    }else
+    {
+        ESP_LOGI(USER_TAG, "There was an error during task creation!");
+    }
+    // Checking if all mesage queues are properly initialized
+    if (queue_espnow_stage == NULL)
+    {
+        ESP_LOGE(USER_TAG, "espnow staging queue was not initialized properly");
+    }
+    if (queue_image == NULL)
+    {
+        ESP_LOGE(USER_TAG, "image queue was not initalized properly");
+    }
+
+    //This part of code should also create the tasks for AD converter
+
     return;
 }
 
@@ -616,14 +669,14 @@ void espnow_receive_data_task()
         image_data_raw image_data;
         uint8_t *data = NULL;
         ESP_LOGD(USER_TAG, "Reading data from com_queue for data receptioon task: receive_data_task");
-        xQueueReceive(espnow_com_queue, &image_data, portMAX_DELAY);
+        xQueueReceive(queue_espnow_stage, &image_data, portMAX_DELAY);
 
         //This portion should be for checking the crc value of the data
 
         //This portion should be for checking the crc value of the data
 
         ESP_LOGD(USER_TAG, "sending data to for data receptioon task: receive_data_task");
-        xQueueSend(image_queue, &image_data, portMAX_DELAY);
+        xQueueSend(queue_image, &image_data, portMAX_DELAY);
 
     }
     
@@ -637,7 +690,7 @@ void espnow_parse_data_task()
     for(;;)
     {
         image_data_raw *image_data = NULL;
-        xQueueReceive(image_queue, image_data, portMAX_DELAY);
+        xQueueReceive(queue_image, image_data, portMAX_DELAY);
         ESP_LOGI(USER_TAG, "received image size of %d", image_data->len);
         for(int i = 0; i < image_data->len; i++)
         {
@@ -652,10 +705,46 @@ void espnow_parse_data_task()
 void xinit_receive_data_tasks()
 {
     example_espnow_send_param_t *pv_parameters = NULL;
-    xTaskCreatePinnedToCore(*espnow_receive_data_task, "espnow_receive_data_task", 4000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, espnow_send_data_taskHandle, 0);
-    xTaskCreatePinnedToCore(*espnow_parse_data_task, "espnow_parse_data_task", 4000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, espnow_data_prep_taskHandle, 0);
+    xTaskCreatePinnedToCore(espnow_receive_data_task, "espnow_receive_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0);
+    xTaskCreatePinnedToCore(espnow_parse_data_task, "espnow_parse_data_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0);
+
+    //This part of the code should also create the tasks for the USB communication with external PC
     return;
 }
+
+void init_tasks(void)
+{
+
+    if (run_example == true)
+        {   
+            //Example implementation
+            example_wifi_init();
+            example_espnow_init();
+        }else
+        {
+            // Start of user implementation
+            ESP_LOGI(USER_TAG, "Starting User code in main app");
+            example_wifi_init();
+            user_espnow_init();
+            switch (device_role)
+            {
+            case DEVICE_ROLE_SENDER:
+                ESP_LOGI(USER_TAG, "Starting sender tasks");
+                xinit_send_data_tasks();
+                break;
+            case DEVICE_ROLE_RECIEVER:
+                ESP_LOGI(USER_TAG, "Starting receiver tasks");
+                xinit_receive_data_tasks();
+                break;
+            default:
+                ESP_LOGE(USER_TAG, "This device does not have an assigned role. \nCheck periferal connections and program code");
+                break;
+            }
+        }
+        // Task deletes itself after finishing initialization
+        vTaskDelete(NULL);
+}
+
 
 void app_main(void)
 {
@@ -667,29 +756,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK( ret );
 
-    if (run_example == true)
-    {   
-        //Example implementation
-        example_wifi_init();
-        example_espnow_init();
-    }else
-    {
-        // Start of user implementation
-        ESP_LOGI(USER_TAG, "Starting User code in main app");
-        user_espnow_init();
-        switch (device_role)
-        {
-        case DEVICE_ROLE_SENDER:
-            xinit_send_data_tasks();
-            break;
-        case DEVICE_ROLE_RECIEVER:
-            xinit_receive_data_tasks();
-            break;
-        default:
-            ESP_LOGE(USER_TAG, "This device does not have an assigned role. \nCheck periferal connections and program code");
-            break;
-        }
-    }
+    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 5000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
+    
+    return;
     
 }
 

@@ -1,0 +1,1 @@
+warning: default value 0 on ESPNOW_OTA_SEND_FORWARD_TTL (defined at E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__esp-now/Kconfig:130) clamped to 1 due to being outside the active range ([1, 31])
