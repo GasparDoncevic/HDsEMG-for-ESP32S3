@@ -103,16 +103,18 @@ typedef struct
 
 typedef struct
 {
-    bool am_emitter;
-    uint8_t my_field_length;
-    uint8_t my_field_width;
+    bool broadcast;                       //Send broadcast ESPNOW data.
+    uint32_t device_role;                 //Magic number which is used to determine which device to send unicast ESPNOW data.
+    int len;                              //Length of ESPNOW data to be sent, unit: byte.
+    uint8_t *buffer;                      //Buffer pointing to ESPNOW data.
+    uint8_t dest_mac[ESP_NOW_ETH_ALEN];   //MAC address of destination device.
 
-} handshake_data;
+} espnow_send_param_t;
 
 typedef struct
 {
-    uint8_t *data;
     uint8_t len;
+    uint16_t data[FIELD_WIDTH*FIELD_LENGTH];
 } image_data_raw;
 
 #endif
