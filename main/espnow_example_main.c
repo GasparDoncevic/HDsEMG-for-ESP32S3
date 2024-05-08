@@ -59,7 +59,7 @@ SemaphoreHandle_t semaphore_send = NULL;
 SemaphoreHandle_t semaphore_receive = NULL;
 
 static const char *USER_TAG = "user_espnow";
-example_espnow_send_param_t *send_parameters = NULL;
+//example_espnow_send_param_t *send_parameters = NULL;
 //USER PRIVATE VARIABLES
 static const char *TAG = "espnow_example";
 
@@ -71,6 +71,9 @@ static uint16_t s_example_espnow_seq[EXAMPLE_ESPNOW_DATA_MAX] = { 0, 0 };
 
 
 static void example_espnow_deinit(example_espnow_send_param_t *send_param);
+
+//function prototypes
+void TEST_espnow_data_print(espnow_data_t* data);
 
 /* WiFi should start before using ESPNOW */
 static void example_wifi_init(void)
@@ -554,7 +557,7 @@ void espnow_data_prep_task(void *pv_parameters)
         ESP_LOGI(USER_TAG, "data_prep_task: creating new instance of send parameters");
         //A new send parameters is allocated and will be freed in send callback function
         
-         send_parameters = malloc(sizeof(espnow_send_param_t));
+        espnow_send_param_t* send_parameters = malloc(sizeof(espnow_send_param_t));
         if (send_parameters == NULL) {
             ESP_LOGE(TAG, "Malloc send parameter fail");
         }
@@ -563,21 +566,25 @@ void espnow_data_prep_task(void *pv_parameters)
         //send_parameters->unicast = false;
         send_parameters->broadcast = true;
         //send_parameters->state = 0;
-        send_parameters->magic = device_role;
        // send_parameters->count = CONFIG_ESPNOW_SEND_COUNT;
         //send_parameters->delay = CONFIG_ESPNOW_SEND_DELAY;
         send_parameters->len = sizeof(espnow_data_t);
-        send_parameters->buffer = NULL;
+        send_parameters->buffer = malloc(sizeof(espnow_data_t));
+        if (send_parameters == NULL) {
+            ESP_LOGE(USER_TAG, "Malloc buffer fail");
+        }
+        ESP_LOGI(USER_TAG, "data_prep_task: creating new instance of send parameters at address %p", send_parameters->buffer);
+        memset(send_parameters->buffer, 0, sizeof(espnow_data_t));
         memcpy(send_parameters->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-
+        
         
         //espnow_data *buf = (espnow_data *) send_parameters->buffer;
         uint16_t *image_data = NULL;
         xQueueReceive(queue_image, &image_data, portMAX_DELAY);
-        espnow_data_t *buf = malloc(sizeof(espnow_data_t));
+        espnow_data_t *buf = send_parameters->buffer;
         ESP_LOGI(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
         ESP_LOGI(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
-        memcpy(buf->payload, image_data, IMAGE_SIZE);
+        memcpy(buf->payload, image_data, IMAGE_SIZE*2);
         ESP_LOGI(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
         free(image_data);
 
@@ -587,16 +594,16 @@ void espnow_data_prep_task(void *pv_parameters)
         
 
         buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
-        buf->state = send_parameters->state;
+        buf->state = 0;
         buf->seq_num = s_example_espnow_seq[buf->type]++;
         buf->crc = 0;
-        buf->magic = send_parameters->magic;
-        // /* Fill all remaining bytes after the data with random values */
-        // esp_fill_random(buf->payload, send_param->len - sizeof(example_espnow_data_t));
+        buf->magic = device_role;
         buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
 
-        send_parameters->buffer = (uint8_t *)buf;
+        //send_parameters->buffer = buf;
         ESP_LOGI(USER_TAG, "Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
+        //TEST_espnow_data_print(buf);
+        //TEST_espnow_data_print(send_parameters->buffer);
         //is there a way to notify if the queue is full?
         xQueueSend(queue_espnow_stage, &send_parameters, portMAX_DELAY);
         }
@@ -610,15 +617,16 @@ void espnow_send_data_task(void *pv_parameters)
     //example_espnow_send_param_t *send_param = NULL;
     for(;;)
     {
-        espnow_send_param_t * send_parameters = NULL;
+        espnow_send_param_t *send_parameters = NULL;
         ESP_LOGI(USER_TAG ,"send_data_task: Taking send semaphore");
         xSemaphoreTake(semaphore_send, portMAX_DELAY);
 
         ESP_LOGI(USER_TAG ,"send_data_task: Taking data from queue");
         xQueuePeek(queue_espnow_stage, &send_parameters, portMAX_DELAY);
+        //TEST_espnow_data_print(send_parameters->buffer);
         ESP_LOGI(USER_TAG, "send_data_task: address of received send_parameters %p", send_parameters);
         ESP_LOGI(USER_TAG, "send_data_task: Send espnow_data from location %p", (send_parameters->buffer));
-        if (esp_now_send(send_parameters->dest_mac, (send_parameters->buffer), send_parameters->len) != ESP_OK)
+        if (esp_now_send(send_parameters->dest_mac, (uint8_t *)(send_parameters->buffer), send_parameters->len) != ESP_OK)
         {
             ESP_LOGE(USER_TAG, "send_data_task: Failed to send data to destination address");
             xSemaphoreGive(semaphore_send);
@@ -754,6 +762,26 @@ void init_tasks()
         vTaskDelete(NULL);
 }
 
+//this is a test function to display all of the data in the in the allocated espnow data structure
+void TEST_espnow_data_print(espnow_data_t* data)
+{
+    ESP_LOGI(USER_TAG, "The address of the structure is %p", data);
+    if (data->type == EXAMPLE_ESPNOW_DATA_BROADCAST)
+    {
+        ESP_LOGI(USER_TAG, "Boradcast type is BROADCAST");
+    }else if(data->type == EXAMPLE_ESPNOW_DATA_UNICAST)
+    {
+        ESP_LOGI(USER_TAG, "Boradcast type is UNICAST");
+    }
+
+    // max size of the structure for now is 42 and the last 32 bytes are payload data packed in uint16_t type
+    for(int i = 0; i < 16; i++)
+    {
+        ESP_LOGI(USER_TAG, "the %dth payload data is %d", i ,(int)(data->payload[i]));
+    }   
+
+    return;
+}
 
 void app_main(void)
 {
