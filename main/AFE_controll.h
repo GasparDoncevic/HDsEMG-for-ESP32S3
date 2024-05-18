@@ -4,6 +4,7 @@
 
 
 //FUNCTIONS
+void AFE_config();
 void Task_AFE_init();
 void Task_init_AFE_tasks();
 void AFE_controll_send_command();
