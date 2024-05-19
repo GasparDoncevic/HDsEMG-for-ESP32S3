@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "espnow_test",
-    "project_version":    "f7566c7-dirty",
+    "project_version":    "ba3c530-dirty",
     "project_path":       "E:/Repos/diplomski/espnow_test/espnow_test",
     "idf_path":           "C:/Users/Gaspar/esp/v5.2.1/esp-idf",
     "build_dir":          "E:/Repos/diplomski/espnow_test/espnow_test/build",
@@ -21,7 +21,7 @@
     "monitor_toolprefix": "xtensa-esp32s3-elf-",
     "c_compiler":         "C:/Users/Gaspar/.espressif/tools/xtensa-esp-elf/esp-13.2.0_20230928/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc.exe",
     "config_environment" : {
-        "COMPONENT_KCONFIGS" : "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/app_trace/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/bt/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/driver/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/efuse/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp-tls/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_adc/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_coex/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_common/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_eth/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_event/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_gdbstub/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_http_client/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_http_server/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_https_ota/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_https_server/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_hw_support/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_lcd/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_netif/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_partition/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_phy/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_pm/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_psram/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_ringbuf/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_system/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_timer/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_wifi/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/espcoredump/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/fatfs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/freertos/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/hal/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/ieee802154/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/log/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/lwip/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/mbedtls/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/mqtt/esp-mqtt/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/newlib/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/nvs_flash/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/nvs_sec_provider/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/openthread/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/protocomm/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/pthread/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/soc/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/spi_flash/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/spiffs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/tcp_transport/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/ulp/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/unity/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/usb/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/vfs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/wear_levelling/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/wifi_provisioning/Kconfig;E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__esp-now/Kconfig;E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__cmake_utilities/Kconfig",
+        "COMPONENT_KCONFIGS" : "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/app_trace/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/bt/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/driver/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/efuse/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp-tls/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_adc/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_coex/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_common/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_eth/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_event/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_gdbstub/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_http_client/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_http_server/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_https_ota/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_https_server/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_hw_support/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_lcd/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_netif/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_partition/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_phy/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_pm/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_psram/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_ringbuf/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_system/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_timer/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_wifi/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/espcoredump/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/fatfs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/freertos/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/hal/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/ieee802154/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/log/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/lwip/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/mbedtls/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/mqtt/esp-mqtt/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/newlib/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/nvs_flash/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/nvs_sec_provider/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/openthread/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/protocomm/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/pthread/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/soc/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/spi_flash/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/spiffs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/tcp_transport/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/ulp/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/unity/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/usb/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/vfs/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/wear_levelling/Kconfig;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/wifi_provisioning/Kconfig;E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__cmake_utilities/Kconfig;E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__esp-now/Kconfig",
         "COMPONENT_KCONFIGS_PROJBUILD" : "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/bootloader/Kconfig.projbuild;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_app_format/Kconfig.projbuild;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esp_rom/Kconfig.projbuild;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/esptool_py/Kconfig.projbuild;C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/partition_table/Kconfig.projbuild;E:/Repos/diplomski/espnow_test/espnow_test/main/Kconfig.projbuild"
     },
     "common_component_reqs": [ "cxx", "newlib", "freertos", "esp_hw_support", "heap", "log", "soc", "hal", "esp_rom", "esp_common", "esp_system", "xtensa" ],
@@ -2163,18 +2163,6 @@
             "managed_priv_reqs": [ "espressif__esp-now" ],
             "include_dirs": [ "." ]
         },
-        "espressif__esp-now": {
-            "alias": "idf::espressif__esp-now",
-            "target": "___idf_espressif__esp-now",
-            "prefix": "idf",
-            "dir": "E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__esp-now",
-            "lib": "__idf_espressif__esp-now",
-            "reqs": [ "console", "fatfs", "spiffs", "app_update", "esp_http_client", "esp_https_ota", "efuse", "mbedtls", "protobuf-c", "protocomm", "spi_flash", "nvs_flash", "esp_timer", "esp_wifi", "driver" ],
-            "priv_reqs": [ "espressif__cmake_utilities" ],
-            "managed_reqs": [],
-            "managed_priv_reqs": [ "espressif__cmake_utilities" ],
-            "include_dirs": [ "src/control/include", "src/debug/include", "src/debug/include/sdcard", "src/debug/src", "src/debug/src/commands/pcap", "src/espnow/include", "src/ota/include", "src/provisioning/include", "src/security/include", "src/security/include/protocomm/security", "src/utils/include" ]
-        },
         "espressif__cmake_utilities": {
             "alias": "idf::espressif__cmake_utilities",
             "target": "___idf_espressif__cmake_utilities",
@@ -2186,6 +2174,18 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "include_dirs": []
+        },
+        "espressif__esp-now": {
+            "alias": "idf::espressif__esp-now",
+            "target": "___idf_espressif__esp-now",
+            "prefix": "idf",
+            "dir": "E:/Repos/diplomski/espnow_test/espnow_test/managed_components/espressif__esp-now",
+            "lib": "__idf_espressif__esp-now",
+            "reqs": [ "console", "fatfs", "spiffs", "app_update", "esp_http_client", "esp_https_ota", "efuse", "mbedtls", "protobuf-c", "protocomm", "spi_flash", "nvs_flash", "esp_timer", "esp_wifi", "driver" ],
+            "priv_reqs": [ "espressif__cmake_utilities" ],
+            "managed_reqs": [],
+            "managed_priv_reqs": [ "espressif__cmake_utilities" ],
+            "include_dirs": [ "src/control/include", "src/debug/include", "src/debug/include/sdcard", "src/debug/src", "src/debug/src/commands/pcap", "src/espnow/include", "src/ota/include", "src/provisioning/include", "src/security/include", "src/security/include/protocomm/security", "src/utils/include" ]
         }
     },
     "debug_prefix_map_gdbinit": ""
