@@ -506,8 +506,11 @@ void app_main(void)
     }
     ESP_ERROR_CHECK( ret );
 
-    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
-    
+    // Creating task for testing espnow
+    //xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
+    //Creating task for initializing and testing SPI
+    TEST_SPI();
+
     return;
     
 }
