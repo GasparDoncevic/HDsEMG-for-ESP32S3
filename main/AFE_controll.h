@@ -2,6 +2,15 @@
 //and configuration settings for the whole ADC daisy-chain
 
 
+//USER DEFINES
+#define AFE_NUM_OF_ADC 1
+#define AFE_COMMAND_LEN 16
+#define ADC_CHANNEL_NUM 8
+
+//USER DEFINES
+
+
+
 
 //FUNCTIONS
 void AFE_config();

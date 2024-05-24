@@ -19,6 +19,7 @@
     "files.associations": {
         "stdlib.h": "c",
         "freertos.h": "c",
-        "freertosconfig.h": "c"
+        "freertosconfig.h": "c",
+        "semphr.h": "c"
     }
 }

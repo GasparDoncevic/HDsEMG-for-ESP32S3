@@ -4,6 +4,36 @@
 //      create init function for initializing the whole daisy chain
 // all init functions will be called in the main app, and all tasks will be assigned to core 1
 // First the bus must be initialized then the devices
+// TODO: Add a function that implements a reset by send a pulse to RESET_PIN
+
+/*LIST OF ALL GPIO PINS USED FOR SPI COMMUNICATION AND PIN CONFIG
+    SPI SLAVE 
+        CS0     GPIO_7
+        MISO    GPIO_4
+        MOSI    GPIO_5
+        CLK     GPIO_6
+
+    SPI MASTER
+        CS0     GPIO_10
+        CS1     GPIO_9
+        CS2     GPIO_14
+        CS3     GPIO_8
+        MISO    GPIO_11
+        MOSI    GPIO_13
+        CLK     GPIO_12
+
+    FORMATX PINS
+        FORMAT0_PIN     GPIO_17
+        FORMAT1_PIN     GPIO_14
+    
+    XTAL PINS
+        XTAL_P  GPIO_15
+        XTAL_N  GPIO_16
+    
+    RESET PIN   GPIO_43
+*/  
+
+
 
 #include <stdlib.h>
 #include <time.h>
@@ -27,14 +57,35 @@
 #include "driver/spi_slave.h"
 #include "driver/gpio.h"
 
-//TODO: add defines for FORMATx pins and set them to 00 for using only one DOUT line
 
-//USER DEFINES
-#define AFE_NUM_OF_ADC 1
-#define AFE_COMMAND_LEN 16
-#define ADC_CHANNEL_NUM 8
+//ADC REGISTER ADDRESSES
+#define ADDRESS_ADC_CHANNEL_STANDBY  0x0 //each channel has its' own bit
+#define ADDRESS_ADC_CHANNEL_MODE_A 0x01 // determines filter type and decimation rate
+#define ADDRESS_ADC_CHANNEL_MODE_B  0x02 // determines filter type and decimation rate
+#define ADDRESS_ADC_CHANNEL_MODE_SEL  0x03 // Selects channel mode for each channel
+#define ADDRESS_ADC_POWER_MODE 0x04 // Contains sleep_mode, power_mode, LVDS_enable, MCLK_DIV
+#define ADDRESS_ADC_CONFIG  0x05 // contains CLK_QUAL_DIS, RETIME_EN, VCM_PD, VCM_VSEL
+#define ADDRESS_ADC_DATA_CONTROL 0x06 // contains SPI_SYNC, SINGLE_SHOT_EN, SPI_RESET
+#define ADDRESS_ADC_INTERFACE_CONFIG 0x07 // contains CRC_select, DCLK_DIV
+#define ADDRESS_ADC_CHIP_STATUS 0x09 // CHIP_ERROR, NO_CLOCK_ERROR, RAM_BIST_PASS, RAM_BIST_RUNNING 
+#define ADDRESS_ADC_GPIO_CONTROL 0x0E // Contains UGPIO_enable, GPIOE4_FILTER, GPIOE3_MODE3,GPIOE2_MODE2, GPIOE1_MODE1, GPIO0_MODE0
+#define ADDRESS_ADC_GPIO_WRITE 0x0F  // Write states for the five GPIO pins
+#define ADDRESS_ADC_GPIO_READ  0x10 // Reads state from the 5 GPIO pins 
+//ADC REGISTER ADDRESSES
 
-//USER DEFINES
+//ADC REGISTER MASKS, Datasheet of the AD7761 needs to be checked to verify which bit control which feature
+#define MASK_ADC_READ 0x80   // Sets the R/W bit to read
+#define MASK_ADC_WRITE 0x00  // Sets the R/W bit to write
+#define MASK_ADC_FILTER_SINC5   0x8
+#define MASK_ADC_FILTER_WIDEBAND 0x0
+//ADC REGISTER MASKS
+
+#define ADC_ERROR_CODE 0x0E00
+
+//GPIO PINS FOR CONFIG
+#define FORMAT0_PIN GPIO_NUM_17
+#define FORMAT1_PIN GPIO_NUM_14
+//GPIO PINS FOR CONFIG
 
 TaskHandle_t Handle_Task_AFE_init = NULL;
 TaskHandle_t Handle_TEST_spi_loop = NULL;
@@ -49,33 +100,109 @@ static spi_bus_config_t bus_spi_slave, bus_spi_master;
 static spi_device_handle_t spi_slave, spi_master[AFE_NUM_OF_ADC];
 static uint8_t CS_pins_master[4] = {GPIO_NUM_10, GPIO_NUM_9, GPIO_NUM_14, GPIO_NUM_8}; // These GPIO pins need to be manually picked from datasheet
 
-//ADC Commands, Datasheet of the AD7761 needs to be checked to verify which bit control which feature
-/* static const uint8_t ADDRESS_ADC_CHANNEL_STANDBY = 0; //each channel has its' own bit
-static const uint8_t ADDRESS_ADC_CHANNEL_MODE_A = 0x01; // determines filter type and decimation rate
-static const uint8_t ADDRESS_ADC_CHANNEL_MODE_B = 0x02; // determines filter type and decimation rate
-static const uint8_t ADDRESS_ADC_CHANNEL_MODE_SEL = 0x03; // Selects channel mode for each channel
-static const uint8_t ADDRESS_ADC_POWER_MODE = 0x04; // Contains sleep_mode, power_mode, LVDS_enable, MCLK_DIV
-static const uint8_t ADDRESS_ADC_CONFIG = 0x05; // contains CLK_QUAL_DIS, RETIME_EN, VCM_PD, VCM_VSEL
-static const uint8_t ADDRESS_ADC_DATA_CONTROL = 0x06; // contains SPI_SYNC, SINGLE_SHOT_EN, SPI_RESET
-static const uint8_t ADDRESS_ADC_INTERFACE_CONFIG = 0x07; // contains CRC_select, DCLK_DIV
-static const uint8_t ADDRESS_ADC_CHIP_STATUS = 0x09; // CHIP_ERROR, NO_CLOCK_ERROR, RAM_BIST_PASS, RAM_BIST_RUNNING 
-static const uint8_t ADDRESS_ADC_GPIO_CONTROL = 0x0E; // Contains UGPIO_enable, GPIOE4_FILTER, GPIOE3_MODE3,GPIOE2_MODE2, GPIOE1_MODE1, GPIO0_MODE0
-static const uint8_t ADDRESS_ADC_GPIO_WRITE = 0x0F;  // Write states for the five GPIO pins
-static const uint8_t ADDRESS_ADC_GPIO_READ = 0x10; // Reads state from the 5 GPIO pins */
-//ADC Commands
 
-//This is the function where the ADC daisy-chain configuration should be done
-void AFE_config()
+// Todo: toggle reset pins to reset the ADC, THIS AFFECTS ALL ADCs IN THE CHAIN
+void AFE_reset()
 {
-    // each iteration of the loop configures one ADC in the daisy-chain
-    //each register is configured with two send commands, first  for register address, second for register value
-    // then a read command needs to be issued to check for error code
-    for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
-    {
-        
-    }
 
 }
+
+// This function is intended to be called after every config command sent to ADC to read the response in case an error code appears
+uint8_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction_t * transaction_get_response)
+{
+    uint8_t response = 0;
+    transaction_get_response->length = 16;
+    transaction_get_response->rx_buffer = &response;
+    transaction_get_response->tx_buffer = NULL;
+    spi_device_transmit(spi_device, transaction_get_response);
+    return response;
+}
+
+esp_err_t AFE_Send_Command(spi_device_handle_t spi_device,  uint8_t address, uint8_t reg_value)
+{
+    spi_transaction_t transaction_config, trasnaction_response;
+    //configuring config transaction
+    transaction_config.length = 16;
+    transaction_config.rx_buffer = NULL;
+    uint8_t command[2] = {address, reg_value};
+    transaction_config.tx_buffer = &command;
+    //configuring response transaciton
+    trasnaction_response.tx_buffer = NULL;
+    trasnaction_response.length = 16;
+    
+    esp_err_t result;
+    uint8_t cmd_attempts_ADC = 0;
+
+    do 
+    {
+        //Attempts sending the same command 3 times then quits AFE config 
+        if (cmd_attempts_ADC >=3)
+        {
+            ESP_LOGE(TAG_AFE, "All command attempts failed, exiting config routine");
+            return ESP_FAIL;
+        }
+        cmd_attempts_ADC++;
+        result = spi_device_transmit(spi_device, &transaction_config);
+    }while(ADC_ERROR_CODE == AFE_command_get_response(spi_device, &trasnaction_response));
+
+    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI config command failed with error %s", result);
+
+    return result;
+
+}
+
+//This is the function where the ADC daisy-chain configuration should be done
+esp_err_t AFE_config()
+{
+    esp_err_t result;
+
+    // each iteration of the loop configures one ADC in the daisy-chain
+    
+    
+    for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
+    {
+        spi_transaction_t initial_response;
+        
+        //setting channel on standby (NONE)
+        //First response after reset is alays error code
+        if (ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
+
+        //Sending first command for channel stanby mode
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, 0x00);
+        if(result == ESP_FAIL) break;
+        
+        //Sending command for channel mode A
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_A, 0x00);
+        if(result == ESP_FAIL) break;
+
+        //Sending command for channel mode select
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL, 0x00);
+        if(result == ESP_FAIL) break;
+
+        //Sending command for power mode
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE, 0x00);
+        if(result == ESP_FAIL) break;
+
+        //Sending command for general config
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CONFIG, 0x00);
+        if(result == ESP_FAIL) break;
+
+        //Sending command for interface config
+        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG, 0x00);
+        if(result == ESP_FAIL)
+        {
+            break;
+        } else if(result == ESP_OK)
+        {
+            ESP_LOGI(TAG_AFE, "Device &d configured successfully", device);
+        }
+
+    }
+
+    if (ESP_OK == result) ESP_LOGI(TAG_AFE, "All devices were configures successfully");
+    return result;
+}
+
 void slave_post_trans_cb(spi_slave_transaction_t *trans)
 {
     // This is used to set custopm handshakes 
@@ -140,6 +267,7 @@ void Task_AFE_init()
 
     for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
     {
+        // The ADC operates in mode 0
         //Initializing master device for ADC daisy-chain config
         (device_spi_master[device]).clock_speed_hz = 5000000;
         (device_spi_master[device]).mode = 0;
@@ -171,10 +299,7 @@ void Task_init_AFE_tasks()
 
 }
 
-void AFE_controll_send_command()
-{
 
-}
 // Function intended for seeing if the spi pins really do output the correct data and if the signals are correctly routed
 // spi3 is slave, spi2 is master
 void Task_TEST_loopback_sender()
