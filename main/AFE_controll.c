@@ -27,10 +27,12 @@
         FORMAT1_PIN     GPIO_14
     
     XTAL PINS
-        XTAL_P  GPIO_15
-        XTAL_N  GPIO_16
+        XTAL_P  GPIO_20
+        XTAL_N  GPIO_21
     
-    RESET PIN   GPIO_43
+    /PIN / SPI  GPIO_38
+
+    RESET PIN   GPIO_18
 */  
 
 
@@ -51,11 +53,12 @@
 #include "esp_mac.h"
 #include "esp_now.h"
 #include "esp_crc.h"
-#include "AFE_controll.h"
 #include "driver/spi_common.h"
 #include "driver/spi_master.h"
 #include "driver/spi_slave.h"
 #include "driver/gpio.h"
+#include "AFE_controll.h"
+#include "AFE_config.h"
 
 
 //ADC REGISTER ADDRESSES
@@ -82,15 +85,13 @@
 
 #define ADC_ERROR_CODE 0x0E00
 
-//GPIO PINS FOR CONFIG
-#define FORMAT0_PIN GPIO_NUM_17
-#define FORMAT1_PIN GPIO_NUM_14
-//GPIO PINS FOR CONFIG
+
 
 TaskHandle_t Handle_Task_AFE_init = NULL;
 TaskHandle_t Handle_TEST_spi_loop = NULL;
 TaskHandle_t Handle_Task_TEST_loopback_receiver = NULL;
 TaskHandle_t Handle_Task_TEST_loopback_sender = NULL;
+TaskHandle_t Handle_Task_TEST_GPIO = NULL;
 
 static const char *TAG_AFE = "AFE";
 
@@ -98,13 +99,54 @@ static spi_slave_interface_config_t device_spi_slave;
 static spi_device_interface_config_t device_spi_master[AFE_NUM_OF_ADC];
 static spi_bus_config_t bus_spi_slave, bus_spi_master;
 static spi_device_handle_t spi_slave, spi_master[AFE_NUM_OF_ADC];
-static uint8_t CS_pins_master[4] = {GPIO_NUM_10, GPIO_NUM_9, GPIO_NUM_14, GPIO_NUM_8}; // These GPIO pins need to be manually picked from datasheet
+static uint8_t CS_pins_master[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
 
-
-// Todo: toggle reset pins to reset the ADC, THIS AFFECTS ALL ADCs IN THE CHAIN
-void AFE_reset()
+// for now this is locked out of using other DOUT modes, later a parameter will be added for configurability
+esp_err_t AFE_set_dout_format()
 {
+    gpio_set_level(FORMAT0_pin, 0);
+    gpio_set_level(FORMAT1_pin, 0);
+}
 
+esp_err_t AFE_set_SPI_controll_mode(bool SPI_mode)
+{
+    return gpio_set_level(CONTROL_MODE_pin, SPI_mode);
+}
+
+esp_err_t AFE_reset(bool use_spi)
+{
+    esp_err_t result;
+    if(use_spi == false)
+    {
+        result = gpio_set_level(RESET_pin, 0);
+        if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to toggle RESET pin");
+                return result;
+            }
+        vTaskDelay(500);
+        gpio_set_level(RESET_pin, 1);
+
+    }else
+    {
+        for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
+        {
+            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x03);
+            if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to send reset command");
+                return result;
+            }
+
+            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x02);
+            if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to send reset command");
+                return result;
+            }
+        }
+    }
+    return ESP_OK;
 }
 
 // This function is intended to be called after every config command sent to ADC to read the response in case an error code appears
@@ -120,12 +162,12 @@ uint8_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction
 
 esp_err_t AFE_Send_Command(spi_device_handle_t spi_device,  uint8_t address, uint8_t reg_value)
 {
-    spi_transaction_t transaction_config, trasnaction_response;
-    //configuring config transaction
-    transaction_config.length = 16;
-    transaction_config.rx_buffer = NULL;
+    spi_transaction_t transaction_command, trasnaction_response;
+    //configuring command transaction
+    transaction_command.length = 16;
+    transaction_command.rx_buffer = NULL;
     uint8_t command[2] = {address, reg_value};
-    transaction_config.tx_buffer = &command;
+    transaction_command.tx_buffer = &command;
     //configuring response transaciton
     trasnaction_response.tx_buffer = NULL;
     trasnaction_response.length = 16;
@@ -142,10 +184,10 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device,  uint8_t address, uin
             return ESP_FAIL;
         }
         cmd_attempts_ADC++;
-        result = spi_device_transmit(spi_device, &transaction_config);
-    }while(ADC_ERROR_CODE == AFE_command_get_response(spi_device, &trasnaction_response));
+        result = spi_device_transmit(spi_device, &transaction_command);
+    }while((uint8_t)ADC_ERROR_CODE == AFE_command_get_response(spi_device, &trasnaction_response));
 
-    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI config command failed with error %s", result);
+    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI config command failed");
 
     return result;
 
@@ -194,9 +236,10 @@ esp_err_t AFE_config()
             break;
         } else if(result == ESP_OK)
         {
-            ESP_LOGI(TAG_AFE, "Device &d configured successfully", device);
+            ESP_LOGI(TAG_AFE, "Device %d configured successfully", device);
         }
 
+        //RESET command needs to be issued
     }
 
     if (ESP_OK == result) ESP_LOGI(TAG_AFE, "All devices were configures successfully");
@@ -223,18 +266,27 @@ void Task_AFE_init()
 {
     for(;;)
     {
-        //initializing  buses
+    //initializing GPIO PINS
+    gpio_config_t pins_output;
+    pins_output.intr_type = GPIO_INTR_DISABLE;
+    pins_output.mode = GPIO_MODE_OUTPUT;
+    pins_output.pin_bit_mask = (1ULL<<FORMAT0_pin) | (1ULL<<FORMAT1_pin) | (1ULL<<RESET_pin);
+    pins_output.pull_down_en = 0;
+    pins_output.pull_up_en = 0;
+    gpio_config(&pins_output);
+
+    //initializing  buses
     ESP_LOGI(TAG_AFE, "Starting SPI init");
     //Initializing slave bus ADC daisy-chain data
-    bus_spi_slave.miso_io_num = GPIO_NUM_4;
-    bus_spi_slave.mosi_io_num = GPIO_NUM_5;
-    bus_spi_slave.sclk_io_num = GPIO_NUM_6;
+    bus_spi_slave.miso_io_num = SPI_SLAVE_MISO;
+    bus_spi_slave.mosi_io_num = SPI_SLAVE_MOSI;
+    bus_spi_slave.sclk_io_num = SPI_SLAVE_CLK;
     //bus_spi_slave.max_transfer_sz = (AFE_NUM_OF_ADC*ADC_CHANNEL_NUM);
 
     ESP_LOGI(TAG_AFE, "Configured SPI slave bus");
     //Initializing slave device for ADC daisy-chain data
     device_spi_slave.mode = 0;
-    device_spi_slave.spics_io_num = GPIO_NUM_7;
+    device_spi_slave.spics_io_num = SPI_SLAVE_CS0;
     device_spi_slave.queue_size = 10;
     device_spi_slave.flags = 0;
     device_spi_slave.post_setup_cb = slave_post_setup_cb;
@@ -254,9 +306,9 @@ void Task_AFE_init()
     //assert( !(spi_slave == NULL));
 
     //initializins master bus for ADC config
-    bus_spi_master.miso_io_num = GPIO_NUM_11;
-    bus_spi_master.mosi_io_num = GPIO_NUM_13;
-    bus_spi_master.sclk_io_num = GPIO_NUM_12;
+    bus_spi_master.miso_io_num = SPI_MASTER_MISO;
+    bus_spi_master.mosi_io_num = SPI_MASTER_MOSI;
+    bus_spi_master.sclk_io_num = SPI_MASTER_CLK;
     //bus_spi_master.max_transfer_sz = AFE_COMMAND_LEN;
     bus_spi_master.quadhd_io_num = -1;
     bus_spi_master.quadwp_io_num = -1;
@@ -285,7 +337,9 @@ void Task_AFE_init()
     //spi_bus_add_device(SPI2_HOST, &device_spi_master, &spi_master);
     //assert( !(spi_master[0] == NULL));
 
-    //AFE_config();
+
+    //ret = AFE_config();
+    if (ret != ESP_OK) ESP_LOGE(TAG_AFE, "AFE configuration failed");
 
     vTaskDelete(NULL);
     }
@@ -362,4 +416,24 @@ void TEST_SPI()
     xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
     xTaskCreatePinnedToCore(TEST_spi_loopback, "TEST_spi_loop", 3000, NULL, 6, &Handle_TEST_spi_loop, 1);
 
+}
+
+void Task_TEST_GPIO()
+{
+    uint8_t mode = 0;
+    for(;;)
+    { 
+        mode++;
+        mode = mode % 2;
+        ESP_LOGI(TAG_AFE, "Changing controll mode %d", mode);
+        if (ESP_OK != AFE_set_SPI_controll_mode(mode)) ESP_LOGE(TAG_AFE, "Failed to toggle SPI mode pin");
+        vTaskDelay(500/portTICK_PERIOD_MS);
+    }
+
+}
+
+void TEST_GPIO()
+{
+    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
+    xTaskCreatePinnedToCore(Task_TEST_GPIO, "Task_TEST_GPIO", 3000, NULL, 6, &Handle_Task_TEST_GPIO, 1);
 }
