@@ -57,6 +57,7 @@
 #include "driver/spi_master.h"
 #include "driver/spi_slave.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
 #include "AFE_controll.h"
 #include "AFE_config.h"
 
@@ -92,6 +93,7 @@ TaskHandle_t Handle_TEST_spi_loop = NULL;
 TaskHandle_t Handle_Task_TEST_loopback_receiver = NULL;
 TaskHandle_t Handle_Task_TEST_loopback_sender = NULL;
 TaskHandle_t Handle_Task_TEST_GPIO = NULL;
+TaskHandle_t Handle_Task_TEST_CLKSRC = NULL;
 
 static const char *TAG_AFE = "AFE";
 
@@ -101,53 +103,7 @@ static spi_bus_config_t bus_spi_slave, bus_spi_master;
 static spi_device_handle_t spi_slave, spi_master[AFE_NUM_OF_ADC];
 static uint8_t CS_pins_master[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
 
-// for now this is locked out of using other DOUT modes, later a parameter will be added for configurability
-esp_err_t AFE_set_dout_format()
-{
-    gpio_set_level(FORMAT0_pin, 0);
-    gpio_set_level(FORMAT1_pin, 0);
-}
 
-esp_err_t AFE_set_SPI_controll_mode(bool SPI_mode)
-{
-    return gpio_set_level(CONTROL_MODE_pin, SPI_mode);
-}
-
-esp_err_t AFE_reset(bool use_spi)
-{
-    esp_err_t result;
-    if(use_spi == false)
-    {
-        result = gpio_set_level(RESET_pin, 0);
-        if(result != ESP_OK)
-            {
-                ESP_LOGE(TAG_AFE, "Failed to toggle RESET pin");
-                return result;
-            }
-        vTaskDelay(500);
-        gpio_set_level(RESET_pin, 1);
-
-    }else
-    {
-        for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
-        {
-            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x03);
-            if(result != ESP_OK)
-            {
-                ESP_LOGE(TAG_AFE, "Failed to send reset command");
-                return result;
-            }
-
-            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x02);
-            if(result != ESP_OK)
-            {
-                ESP_LOGE(TAG_AFE, "Failed to send reset command");
-                return result;
-            }
-        }
-    }
-    return ESP_OK;
-}
 
 // This function is intended to be called after every config command sent to ADC to read the response in case an error code appears
 uint8_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction_t * transaction_get_response)
@@ -193,6 +149,103 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device,  uint8_t address, uin
 
 }
 
+// for now this is locked out of using other DOUT modes, later a parameter will be added for configurability
+esp_err_t AFE_set_dout_format()
+{
+    esp_err_t result;
+    result = gpio_set_level(FORMAT0_pin, 0);
+    if(result != ESP_OK)
+    {
+        ESP_LOGE(TAG_AFE, "Failed to set FORMAT0 pin");
+        return result;
+    }
+    result = gpio_set_level(FORMAT1_pin, 0);
+    if(result != ESP_OK)
+    {
+        ESP_LOGE(TAG_AFE, "Failed to set FORMAT1 pin");
+        return result;
+    }
+
+    return ESP_OK;
+
+}
+
+esp_err_t AFE_set_SPI_controll_mode(bool SPI_mode)
+{
+    return gpio_set_level(CONTROL_MODE_pin, SPI_mode);
+}
+
+esp_err_t AFE_reset(bool use_spi)
+{
+    esp_err_t result;
+    if(use_spi == false)
+    {
+        result = gpio_set_level(RESET_pin, 0);
+        if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to toggle RESET pin");
+                return result;
+            }
+        vTaskDelay(500);
+        gpio_set_level(RESET_pin, 1);
+
+    }else
+    {
+        for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
+        {
+            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x03);
+            if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to send reset command");
+                return result;
+            }
+
+            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x02);
+            if(result != ESP_OK)
+            {
+                ESP_LOGE(TAG_AFE, "Failed to send reset command");
+                return result;
+            }
+        }
+    }
+    return ESP_OK;
+}
+
+esp_err_t AFE_Config_GPIO_pins()
+{
+    gpio_config_t pins_output;
+    pins_output.intr_type = GPIO_INTR_DISABLE;
+    pins_output.mode = GPIO_MODE_OUTPUT;
+    pins_output.pin_bit_mask = (1ULL<<FORMAT0_pin) | (1ULL<<FORMAT1_pin) | (1ULL<<RESET_pin);
+    pins_output.pull_down_en = 0;
+    pins_output.pull_up_en = 0;
+    return gpio_config(&pins_output);
+}
+
+esp_err_t AFE_config_clk_source()
+{
+    ledc_timer_config_t AFE_clk_source = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = LEDC_TIMER_1_BIT,  // this parameter needs to adapt in order to allow high neough frequency
+        .timer_num = LEDC_TIMER_0,
+        .freq_hz =  40000000, //40000000, // set to 40MHz
+        .clk_cfg =  LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&AFE_clk_source));
+
+    ledc_channel_config_t AFE_clk_channel = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0,
+        .timer_sel = LEDC_TIMER_0,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = MCLK_pin,
+        .duty = 1,
+        .hpoint = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&AFE_clk_channel));
+
+    return ESP_OK;
+}
 //This is the function where the ADC daisy-chain configuration should be done
 esp_err_t AFE_config()
 {
@@ -207,7 +260,7 @@ esp_err_t AFE_config()
         
         //setting channel on standby (NONE)
         //First response after reset is alays error code
-        if (ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
+        if ((uint8_t)ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
 
         //Sending first command for channel stanby mode
         result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, 0x00);
@@ -267,13 +320,10 @@ void Task_AFE_init()
     for(;;)
     {
     //initializing GPIO PINS
-    gpio_config_t pins_output;
-    pins_output.intr_type = GPIO_INTR_DISABLE;
-    pins_output.mode = GPIO_MODE_OUTPUT;
-    pins_output.pin_bit_mask = (1ULL<<FORMAT0_pin) | (1ULL<<FORMAT1_pin) | (1ULL<<RESET_pin);
-    pins_output.pull_down_en = 0;
-    pins_output.pull_up_en = 0;
-    gpio_config(&pins_output);
+    AFE_Config_GPIO_pins();
+
+    //Initializing RTC for AFE CLK
+    AFE_config_clk_source();
 
     //initializing  buses
     ESP_LOGI(TAG_AFE, "Starting SPI init");
@@ -338,7 +388,7 @@ void Task_AFE_init()
     //assert( !(spi_master[0] == NULL));
 
 
-    //ret = AFE_config();
+    ret = AFE_config();
     if (ret != ESP_OK) ESP_LOGE(TAG_AFE, "AFE configuration failed");
 
     vTaskDelete(NULL);
@@ -436,4 +486,20 @@ void TEST_GPIO()
 {
     xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
     xTaskCreatePinnedToCore(Task_TEST_GPIO, "Task_TEST_GPIO", 3000, NULL, 6, &Handle_Task_TEST_GPIO, 1);
+}
+void Task_TEST_CLKSRC()
+{
+    ESP_LOGI(TAG_AFE, "Configuring Clock source");
+    AFE_config_clk_source();
+    ESP_LOGI(TAG_AFE, "Clock source configured");
+    for(;;)
+    {
+        vTaskDelay(300/portTICK_PERIOD_MS);
+    }
+}
+
+void TEST_CLKSRC()
+{
+    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
+    xTaskCreatePinnedToCore(Task_TEST_CLKSRC, "Task_TEST_CLKSRC", 3000, NULL, 6, &Handle_Task_TEST_CLKSRC, 1);
 }

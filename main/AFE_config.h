@@ -23,5 +23,8 @@
 #define FORMAT1_pin     GPIO_NUM_14
 #define RESET_pin       GPIO_NUM_18
 #define CONTROL_MODE_pin    GPIO_NUM_38
-#define XTAL_1_pin      GPIO_NUM_20
-#define XTAL_2_pin      GPIO_NUM_21
+#define MCLK_pin      GPIO_NUM_20
+//#define XTAL_2_pin      GPIO_NUM_21
+
+
+//Configuirations for the clock source for the AFE
