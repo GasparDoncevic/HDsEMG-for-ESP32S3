@@ -511,6 +511,8 @@ void app_main(void)
     //Creating task for initializing and testing SPI
     //TEST_GPIO();
     //TEST_CLKSRC();
+    TEST_SPI();
+    
     
 
     return;

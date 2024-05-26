@@ -62,31 +62,6 @@
 #include "AFE_config.h"
 
 
-//ADC REGISTER ADDRESSES
-#define ADDRESS_ADC_CHANNEL_STANDBY  0x0 //each channel has its' own bit
-#define ADDRESS_ADC_CHANNEL_MODE_A 0x01 // determines filter type and decimation rate
-#define ADDRESS_ADC_CHANNEL_MODE_B  0x02 // determines filter type and decimation rate
-#define ADDRESS_ADC_CHANNEL_MODE_SEL  0x03 // Selects channel mode for each channel
-#define ADDRESS_ADC_POWER_MODE 0x04 // Contains sleep_mode, power_mode, LVDS_enable, MCLK_DIV
-#define ADDRESS_ADC_CONFIG  0x05 // contains CLK_QUAL_DIS, RETIME_EN, VCM_PD, VCM_VSEL
-#define ADDRESS_ADC_DATA_CONTROL 0x06 // contains SPI_SYNC, SINGLE_SHOT_EN, SPI_RESET
-#define ADDRESS_ADC_INTERFACE_CONFIG 0x07 // contains CRC_select, DCLK_DIV
-#define ADDRESS_ADC_CHIP_STATUS 0x09 // CHIP_ERROR, NO_CLOCK_ERROR, RAM_BIST_PASS, RAM_BIST_RUNNING 
-#define ADDRESS_ADC_GPIO_CONTROL 0x0E // Contains UGPIO_enable, GPIOE4_FILTER, GPIOE3_MODE3,GPIOE2_MODE2, GPIOE1_MODE1, GPIO0_MODE0
-#define ADDRESS_ADC_GPIO_WRITE 0x0F  // Write states for the five GPIO pins
-#define ADDRESS_ADC_GPIO_READ  0x10 // Reads state from the 5 GPIO pins 
-//ADC REGISTER ADDRESSES
-
-//ADC REGISTER MASKS, Datasheet of the AD7761 needs to be checked to verify which bit control which feature
-#define MASK_ADC_READ 0x80   // Sets the R/W bit to read
-#define MASK_ADC_WRITE 0x00  // Sets the R/W bit to write
-#define MASK_ADC_FILTER_SINC5   0x8
-#define MASK_ADC_FILTER_WIDEBAND 0x0
-//ADC REGISTER MASKS
-
-#define ADC_ERROR_CODE 0x0E00
-
-
 
 TaskHandle_t Handle_Task_AFE_init = NULL;
 TaskHandle_t Handle_TEST_spi_loop = NULL;
@@ -100,7 +75,7 @@ static const char *TAG_AFE = "AFE";
 static spi_slave_interface_config_t device_spi_slave;
 static spi_device_interface_config_t device_spi_master[AFE_NUM_OF_ADC];
 static spi_bus_config_t bus_spi_slave, bus_spi_master;
-static spi_device_handle_t spi_slave, spi_master[AFE_NUM_OF_ADC];
+static spi_device_handle_t spi_master[AFE_NUM_OF_ADC];
 static uint8_t CS_pins_master[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
 
 
@@ -112,7 +87,9 @@ uint8_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction
     transaction_get_response->length = 16;
     transaction_get_response->rx_buffer = &response;
     transaction_get_response->tx_buffer = NULL;
+    transaction_get_response->rxlength = 16;
     spi_device_transmit(spi_device, transaction_get_response);
+    ESP_LOGI(TAG_AFE, "Got response %x", response);
     return response;
 }
 
@@ -124,26 +101,32 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device,  uint8_t address, uin
     transaction_command.rx_buffer = NULL;
     uint8_t command[2] = {address, reg_value};
     transaction_command.tx_buffer = &command;
+    transaction_command.rxlength = 0;
+    transaction_command.flags = 0;
     //configuring response transaciton
+    uint16_t response = 0;
     trasnaction_response.tx_buffer = NULL;
-    trasnaction_response.length = 16;
-    
+    trasnaction_response.rxlength = 16;
+    trasnaction_response.rx_buffer = &response;
     esp_err_t result;
     uint8_t cmd_attempts_ADC = 0;
+
+    ESP_LOGI(TAG_AFE, "Sending data 0x%x", (int)(command[0]<<8 | command[1]));
 
     do 
     {
         //Attempts sending the same command 3 times then quits AFE config 
         if (cmd_attempts_ADC >=3)
         {
-            ESP_LOGE(TAG_AFE, "All command attempts failed, exiting config routine");
+            ESP_LOGE(TAG_AFE, "All command attempts failed, exiting routine");
             return ESP_FAIL;
         }
         cmd_attempts_ADC++;
         result = spi_device_transmit(spi_device, &transaction_command);
-    }while((uint8_t)ADC_ERROR_CODE == AFE_command_get_response(spi_device, &trasnaction_response));
+        AFE_command_get_response(spi_device, &trasnaction_response);
+    }while((uint16_t)ADC_ERROR_CODE == (uint16_t)(response));//(uint8_t)ADC_ERROR_CODE == AFE_command_get_response(spi_device, &trasnaction_response));
 
-    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI config command failed");
+    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI command failed");
 
     return result;
 
@@ -193,14 +176,14 @@ esp_err_t AFE_reset(bool use_spi)
     {
         for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
         {
-            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x03);
+            result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE | ADDRESS_ADC_DATA_CONTROL, MASK_ADC_DC_SPI_RESET_SEQ1);
             if(result != ESP_OK)
             {
                 ESP_LOGE(TAG_AFE, "Failed to send reset command");
                 return result;
             }
 
-            result = AFE_Send_Command(spi_master[device], ADDRESS_ADC_DATA_CONTROL, 0x02);
+            result = AFE_Send_Command(spi_master[device],MASK_ADC_WRITE | ADDRESS_ADC_DATA_CONTROL, MASK_ADC_DC_SPI_RESET_SEQ2);
             if(result != ESP_OK)
             {
                 ESP_LOGE(TAG_AFE, "Failed to send reset command");
@@ -211,7 +194,7 @@ esp_err_t AFE_reset(bool use_spi)
     return ESP_OK;
 }
 
-esp_err_t AFE_Config_GPIO_pins()
+esp_err_t AFE_Config_GPIO_control()
 {
     gpio_config_t pins_output;
     pins_output.intr_type = GPIO_INTR_DISABLE;
@@ -258,36 +241,37 @@ esp_err_t AFE_config()
     {
         spi_transaction_t initial_response;
         
+        ESP_LOGI(TAG_AFE, "Starting config of device %d", device);
         //setting channel on standby (NONE)
         //First response after reset is alays error code
         if ((uint8_t)ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
 
         //Sending first command for channel stanby mode
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, 0x00);
+        result = AFE_Send_Command(spi_master[device], (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, (uint8_t) MASK_ADC_CH_EN_ALL);
         if(result == ESP_FAIL) break;
         
         //Sending command for channel mode A
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_A, 0x00);
+        result = AFE_Send_Command(spi_master[device], (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_A,(uint8_t) MASK_ADC_CMAR_SINC5|MASK_ADC_CMAR_DEC_32);
         if(result == ESP_FAIL) break;
 
         //Sending command for channel mode select
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL, 0x00);
+        result = AFE_Send_Command(spi_master[device], (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL,(uint8_t) MASK_ADC_CMSR_ALL_A);
         if(result == ESP_FAIL) break;
 
         //Sending command for power mode
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE, 0x00);
+        result = AFE_Send_Command(spi_master[device], (uint8_t)MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE,(uint8_t) MASK_ADC_PWR_MODE_LOW|MASK_ADC_LVDS_DIS|MASK_ADC_MCLK_DIV_4);
         if(result == ESP_FAIL) break;
 
         //Sending command for general config
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_CONFIG, 0x00);
+        result = AFE_Send_Command(spi_master[device],(uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CONFIG, (uint8_t)0x08);
         if(result == ESP_FAIL) break;
 
         //Sending command for interface config
-        result = AFE_Send_Command(spi_master[device], MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG, 0x00);
+        /* result = AFE_Send_Command(spi_master[device], (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG,(uint8_t) 0x00);
         if(result == ESP_FAIL)
         {
             break;
-        } else if(result == ESP_OK)
+        } else */ if(result == ESP_OK)
         {
             ESP_LOGI(TAG_AFE, "Device %d configured successfully", device);
         }
@@ -320,7 +304,10 @@ void Task_AFE_init()
     for(;;)
     {
     //initializing GPIO PINS
-    AFE_Config_GPIO_pins();
+    AFE_Config_GPIO_control();
+
+    AFE_set_dout_format();
+    AFE_set_SPI_controll_mode(true);
 
     //Initializing RTC for AFE CLK
     AFE_config_clk_source();
@@ -355,11 +342,12 @@ void Task_AFE_init()
     ESP_LOGI(TAG_AFE, "Initialized SPI device");
     //assert( !(spi_slave == NULL));
 
+    ESP_LOGI(TAG_AFE, "Configuring master bus");
     //initializins master bus for ADC config
     bus_spi_master.miso_io_num = SPI_MASTER_MISO;
     bus_spi_master.mosi_io_num = SPI_MASTER_MOSI;
     bus_spi_master.sclk_io_num = SPI_MASTER_CLK;
-    //bus_spi_master.max_transfer_sz = AFE_COMMAND_LEN;
+    bus_spi_master.max_transfer_sz = AFE_COMMAND_LEN;
     bus_spi_master.quadhd_io_num = -1;
     bus_spi_master.quadwp_io_num = -1;
 
@@ -369,9 +357,10 @@ void Task_AFE_init()
 
     for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
     {
+        ESP_LOGI(TAG_AFE, "Configuring master device %d", device);
         // The ADC operates in mode 0
         //Initializing master device for ADC daisy-chain config
-        (device_spi_master[device]).clock_speed_hz = 5000000;
+        (device_spi_master[device]).clock_speed_hz = 10000000;
         (device_spi_master[device]).mode = 0;
         (device_spi_master[device]).spics_io_num = CS_pins_master[device];
         (device_spi_master[device]).queue_size = 10;
@@ -398,6 +387,8 @@ void Task_AFE_init()
 
 }
 
+
+
 void Task_init_AFE_tasks()
 {
 
@@ -410,8 +401,8 @@ void Task_TEST_loopback_sender()
 {   
     spi_transaction_t data_spi2;
     memset(&data_spi2, 0, sizeof(spi_transaction_t));
-    uint8_t data = 0xA;
-    data_spi2.length = 8;
+    uint8_t data[2] = {0x04, 0x04};
+    data_spi2.length = 16;
     data_spi2.tx_buffer = &data;
     data_spi2.rx_buffer = NULL;
     for(;;)
@@ -419,22 +410,22 @@ void Task_TEST_loopback_sender()
         ESP_LOGI(TAG_AFE, "Sending data via spi on master device");
         spi_device_transmit(spi_master[0], &data_spi2);
         vTaskDelay(500/portTICK_PERIOD_MS);
-        data++;
+        data[0]++;
     }
 }
 void Task_TEST_loopback_receiver()
 {
     spi_slave_transaction_t data_spi3;
     memset(&data_spi3, 0, sizeof(spi_slave_transaction_t));
-    uint8_t recieved_data = 0;
-    data_spi3.length = 8;
+    uint16_t recieved_data = 0;
+    data_spi3.length = 16;
     data_spi3.rx_buffer = &recieved_data;
     data_spi3.tx_buffer = NULL;
     for(;;)
     {
         ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
         spi_slave_transmit(SPI3_HOST, &data_spi3, portMAX_DELAY);        
-        ESP_LOGI(TAG_AFE, "Recieved data is %d", recieved_data); 
+        ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", recieved_data); 
         vTaskDelay(1);
     }
 }
@@ -443,14 +434,9 @@ void TEST_spi_loopback()
     
     
     xTaskCreatePinnedToCore(Task_TEST_loopback_receiver, "Receiver", 3000, NULL, 3, &Handle_Task_TEST_loopback_receiver, 0);
-    xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, 3, &Handle_Task_TEST_loopback_sender, 1);
+    //xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, 3, &Handle_Task_TEST_loopback_sender, 1);
     for(;;)
     {
-
-        
-       
-        
-
         vTaskDelete(NULL);    
         //ESP_LOGI(TAG_AFE, "Waiting a bit before sending");
         //vTaskDelay(500/portTICK_PERIOD_MS);
