@@ -507,7 +507,7 @@ void Task_AFE_get_data()
 
 }
 
-void Task_data_stage()
+void Task_AFE_stage_data()
 {
 
 }
@@ -525,8 +525,8 @@ void Task_init_AFE_tasks()
         }
 
         if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_init", 4000, NULL, configMAX_PRIORITIES-2, Handle_Task_AFE_init, 1)) created_tasks++;
-        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_GET_DATA, Handle_Task_AFE_init, 1)) created_tasks++;
-        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_STAGE_DATA, Handle_Task_AFE_init, 1)) created_tasks++;
+        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_get_data, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_GET_DATA, Handle_TASK_Get_data, 1)) created_tasks++;
+        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_stage_data, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_STAGE_DATA, Handle_Task_Stage_data, 1)) created_tasks++;
         if (created_tasks != 3)
         {
             ESP_LOGE(TAG_AFE, "All tasks were NOT created successfully. Number of created tasks %d", created_tasks);
