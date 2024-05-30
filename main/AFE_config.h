@@ -28,6 +28,8 @@
 
 
 //TODO: Configuirations for the clock source for the AFE
+#define SPI_DATA_CLK 16000000 // 16MHz
+#define AFE_MCLK 32000000 // 32 MHz
 
 //ADC register addresses, and pin masks
 
