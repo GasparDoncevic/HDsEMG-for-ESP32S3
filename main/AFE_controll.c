@@ -58,6 +58,7 @@
 #include "driver/spi_slave.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "driver/gptimer.h"
 #include "AFE_controll.h"
 #include "AFE_config.h"
 
@@ -87,7 +88,21 @@ TaskHandle_t Handle_Task_TEST_loopback_sender = NULL;
 TaskHandle_t Handle_Task_TEST_GPIO = NULL;
 TaskHandle_t Handle_Task_TEST_CLKSRC = NULL;
 
+// TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
+static uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] = {0xAA};
+static spi_transaction_t transaction_mock = {
+        .rx_buffer = NULL,
+        .tx_buffer = &data_mock,
+        .length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET,
+        .rxlength = 0,
+        .flags = 0
+    };
+
+
+
+
 QueueHandle_t queue_AFE_data = NULL;
+extern QueueHandle_t queue_image;
 
 static const char *TAG_AFE = "AFE";
 
@@ -96,7 +111,7 @@ static spi_device_interface_config_t device_spi_master[AFE_NUM_OF_ADC];
 static spi_bus_config_t bus_spi_slave, bus_spi_master;
 static spi_device_handle_t spi_master[AFE_NUM_OF_ADC];
 static uint8_t CS_pins_master[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
-
+static gptimer_handle_t gptimer = NULL;
 
 
 // This function is intended to be called after every config command sent to ADC to read the response in case an error code appears
@@ -253,6 +268,54 @@ esp_err_t AFE_sync_chain()
     return result;
 }
 
+void TEST_MOCK_AFE_create_data()
+{
+    
+    if (ESP_OK != spi_device_queue_trans(spi_master[0], &transaction_mock, 0))
+    {
+        ESP_LOGE(TAG_AFE, "Failed to queue data to spi master ");
+    }
+    //spi_device_transmit(spi_master[0], &transaction_mock);
+
+    return;
+}
+
+void Timer_sync_alarm()
+{
+    // this code is commented out during testing without AFE hardware
+    //AFE_sync_chain();
+    //AFE_sync_chain();
+
+    TEST_MOCK_AFE_create_data();
+}
+
+esp_err_t AFE_Init_Sync_timer()
+{
+    gptimer_config_t gptimer_config ={
+        .clk_src= GPTIMER_CLK_SRC_APB,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 10000,
+        .intr_priority = 0 // this sets the interrupt priority to the lowest priorities
+    };
+    gptimer_alarm_config_t gptimer_alarm = {
+        .alarm_count = 10000/2000,
+        .flags.auto_reload_on_alarm = true,
+        .reload_count = 0,
+    };
+
+    ESP_ERROR_CHECK(gptimer_new_timer(&gptimer_config, &gptimer));
+    gptimer_event_callbacks_t callback = {
+        .on_alarm = Timer_sync_alarm
+    };
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &callback, NULL));
+    ESP_ERROR_CHECK(gptimer_enable(gptimer));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(gptimer, &gptimer_alarm));
+    ESP_ERROR_CHECK(gptimer_start(gptimer));
+
+    return ESP_OK;
+}
+
 esp_err_t AFE_Config_GPIO_control()
 {
     gpio_config_t pins_output;
@@ -372,6 +435,8 @@ void Task_AFE_init()
     //Initializing RTC for AFE CLK
     AFE_config_clk_source();
 
+    
+
     //initializing  buses
     ESP_LOGI(TAG_AFE, "Starting SPI init");
     //Initializing slave bus ADC daisy-chain data
@@ -437,9 +502,14 @@ void Task_AFE_init()
     //spi_bus_add_device(SPI2_HOST, &device_spi_master, &spi_master);
     //assert( !(spi_master[0] == NULL));
 
+    // This delay is required in order to allow all of the settings for the spi slave to settle into the register
+    // This is absolute bullshit i had to empyrically discover, because ofcourse the documentation doesn't say anything
+    vTaskDelay(100/portTICK_PERIOD_MS);
 
     ret = AFE_config();
     if (ret != ESP_OK) ESP_LOGE(TAG_AFE, "AFE configuration failed");
+
+    if (ESP_OK != AFE_Init_Sync_timer()) ESP_LOGE(TAG_AFE, "Failed to set sync timer for AFE");
 
     vTaskDelete(NULL);
     }
@@ -460,33 +530,42 @@ void Task_AFE_get_data()
 {
     // 
     spi_slave_transaction_t transactions[300];
-    uint16_t transaction, result = 0;
+    uint16_t transaction = 0;
     spi_slave_transaction_t* transaction_result = NULL;
     AFE_data *recieved_data;
+
+    // This portion of the code handles the creation of the slave transactions
+    // This is done in advance in order to save time 
+    for(uint16_t i = 0; i < 300; i++)
+    {
+        transactions[transaction].tx_buffer = NULL;
+        transactions[transaction].length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET;
+        transactions[transaction].trans_len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET;
+        
+    }
+    
     
     // Allocating memory for a lot of transactions
     for(;;)
     {
-        // This portion of the code handles the creation of the slave transactions 
-        for (uint8_t i = 0; i < 100; i++)
+        
+        for (uint8_t i = 0; i < 200; i++)
         {
-            transactions[transaction].tx_buffer = NULL;
-            transactions[transaction].length = 24;
-            transactions[transaction].trans_len = 24;
+            
             transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
-
-            spi_slave_queue_trans(SPI3_HOST, &transactions[transaction], 2400);
+            // We will check if we can queue data
+            if(ESP_OK != spi_slave_queue_trans(SPI3_HOST, &transactions[transaction], 0)) break;
             transaction++;
             transaction = transaction % 300;
         }
         
         // this portion handles recieveing results and passing valid data to datat staging via queue
-        for (uint8_t i = 0; i < 100; i++)
+        for (uint8_t i = 0; i < 200; i++)
         {
             // this error occurs when queue is empty so we can immediately skip to preparing more transactions
-            if(ESP_ERR_NOT_SUPPORTED ==  spi_slave_get_trans_result(SPI3_HOST, &transaction_result, 2400)) break; 
+            if(ESP_ERR_TIMEOUT ==  spi_slave_get_trans_result(SPI3_HOST, &transaction_result, 0)) break; 
             recieved_data = (transaction_result->rx_buffer);
-            // Checking  the header only for the first channel of an ADC
+            // Checking  the header only for the first channel of an ADC, to verify if each ADC operates correctly
             for(uint8_t header = 0; header < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; header += AFE_NUM_OF_ADC_CH)
             {
                 if ((0xE0 & recieved_data->data[header]) != 0){
@@ -494,21 +573,41 @@ void Task_AFE_get_data()
                     continue;
                 }
             }
-            xQueueSend(queue_AFE_data, &recieved_data, portMAX_DELAY);
+             if (pdFALSE == xQueueSend(queue_AFE_data, &recieved_data, 0))
+             {
+                ESP_LOGE(TAG_AFE, "Error in sending data to trasaction queue. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
+                
+             }
 
         }
-        
-        
-
-
-
+        vTaskDelay(10);
     }
 
 
 }
 
+// This task recieves unprocessed AFE data and removes the channel headers from the data to get a more compresed data format
 void Task_AFE_stage_data()
 {
+    AFE_data *unparsed_data;
+    image_data_raw image_filtered;
+
+    for(;;)
+    {
+        xQueueReceive(queue_AFE_data, &unparsed_data ,portMAX_DELAY);
+        uint16_t image_point = 0;
+        image_filtered.len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*(AFE_SIZE_DATA_PACKET-1);
+        // The format od the unparsed data is 1 byte header and 2 bytes data
+        for(uint16_t byte = 1; byte < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; byte+=3)
+        {
+            image_filtered.data[image_point] = unparsed_data->data[byte] << 8 | unparsed_data->data[byte+1];
+            image_point++;
+        }
+        //free(unparsed_data);
+        image_data_raw *image_stage = malloc(sizeof(image_data_raw));
+        memcpy(image_stage, &image_filtered, sizeof(image_data_raw));
+        xQueueSend(queue_image, image_stage, portMAX_DELAY);
+    }
 
 }
 
@@ -516,17 +615,30 @@ void Task_init_AFE_tasks()
 {
     // Initializing queue for AFE data
     for(;;){
+        // Setting up test resources
+        memset(&data_mock, 0xAA, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+        // Setting up test resources
+
         uint8_t created_tasks = 0;
+        // Verifying if the image queue resource was generated by the first core, if not waiting and retrying
+        if (queue_image == NULL)
+        {
+            ESP_LOGE(TAG_AFE, "Image queue wasn't initialized yet, waiting a bit for 20ms for it to initialize then retrying");
+            vTaskDelay(20/portTICK_PERIOD_MS);
+            continue;
+        }
+        // initializing queue for transfer of trasactions between get_data and staging tasks
         queue_AFE_data = xQueueCreate(300, sizeof(AFE_data));
         if (queue_AFE_data == NULL)
         {
             ESP_LOGE(TAG_AFE, "Failed to create AFE_data queue, retrying");
             continue;
         }
+        
 
-        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_init", 4000, NULL, configMAX_PRIORITIES-2, Handle_Task_AFE_init, 1)) created_tasks++;
-        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_get_data, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_GET_DATA, Handle_TASK_Get_data, 1)) created_tasks++;
-        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_stage_data, "Task_AFE_init", 5000, NULL, PRIORITY_TASK_STAGE_DATA, Handle_Task_Stage_data, 1)) created_tasks++;
+        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_init", 4000, NULL, configMAX_PRIORITIES-2, &Handle_Task_AFE_init, 1)) created_tasks++;
+        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_get_data, "Task_AFE_init", 10000, NULL, PRIORITY_TASK_GET_DATA, &Handle_TASK_Get_data, 1)) created_tasks++;
+        if ( pdPASS == xTaskCreatePinnedToCore(Task_AFE_stage_data, "Task_AFE_init", 4000, NULL, PRIORITY_TASK_STAGE_DATA, &Handle_Task_Stage_data, 1)) created_tasks++;
         if (created_tasks != 3)
         {
             ESP_LOGE(TAG_AFE, "All tasks were NOT created successfully. Number of created tasks %d", created_tasks);
@@ -571,12 +683,22 @@ void Task_TEST_loopback_receiver()
     data_spi3.length = 16;
     data_spi3.rx_buffer = &recieved_data;
     data_spi3.tx_buffer = NULL;
+    spi_slave_transaction_t * spi_result = NULL;
+    //A delay needs to be added for the slave configuration
+    vTaskDelay(50/portTICK_PERIOD_MS);
     for(;;)
     {
-        ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
+        /* ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
         spi_slave_transmit(SPI3_HOST, &data_spi3, portMAX_DELAY);        
         ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", recieved_data); 
-        vTaskDelay(1);
+        vTaskDelay(1); */
+        ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
+        spi_slave_queue_trans(SPI3_HOST, &data_spi3, portMAX_DELAY);
+
+        
+        spi_slave_get_trans_result(SPI3_HOST, &spi_result, portMAX_DELAY);
+        ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer)) ); 
+        vTaskDelay(100);
     }
 }
 void TEST_spi_loopback()

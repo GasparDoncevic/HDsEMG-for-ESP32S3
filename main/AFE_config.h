@@ -1,6 +1,9 @@
 //This file is inteded to contain all of the define macros for controlling the AFE
 // This is done in order to maintain the abstraction level for the AFE_control module
 // and make it adaptable to any new dvelopment board or microcontroler which wishes to use it
+#ifndef AFE_CONFIG_H
+#define AFE_DONFIG_H
+
 #ifndef driver/gpio.h
 #include "driver/gpio.h"
 #endif
@@ -114,7 +117,7 @@
 #define MASK_ADC_GDCR_CLK_QUAL_EN   0x00
 #define MASK_ADC_GDCR_CLK_QUAL_DIS  0x40
 #define MASK_ADC_GDCR_RETIME_DIS    0x00
-#define MASK_ADC_GDCR_RETIME_DIS    0x20
+#define MASK_ADC_GDCR_RETIME_EN    0x20
 #define MASK_ADC_GDCR_VCM_BUF_EN    0x00
 #define MASK_ADC_GDCR_VCM_BUF_DIS   0x10
 #define MASK_ADC_GDCR_VCM_SEL_HALF  0x00
@@ -139,3 +142,5 @@
 #define MASK_ADC_IC_DCLK_DIV_1      0x03
 
 #define ADC_ERROR_CODE 0x0E00
+
+#endif

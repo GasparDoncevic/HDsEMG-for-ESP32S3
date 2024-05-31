@@ -19,13 +19,15 @@
 #define ESPNOW_WIFI_IF   ESP_IF_WIFI_AP
 #endif
 
+
 #define ESPNOW_QUEUE_SIZE           6
 
 #define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
 
 // CUSTOM USER DEFINES 
-#define FIELD_LENGTH 8 // This is the length of the electrode array
-#define FIELD_WIDTH 2 // This is the width of the electrode array
+#ifndef AFE_CONTROLL_H
+#include "AFE_controll.h"
+#endif
 
 // CUSTOM USER DEFINES 
 
@@ -97,7 +99,7 @@ typedef struct
     uint16_t seq_num;                     //Sequence number of ESPNOW data.
     uint16_t crc;                         //CRC16 value of ESPNOW data.
     uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
-    uint16_t payload[FIELD_LENGTH * FIELD_WIDTH]; // data payload to be sent via espnow
+    uint16_t payload[AFE_NUM_OF_ADC * AFE_NUM_OF_ADC_CH]; // data payload to be sent via espnow
 } PACKED_ATTR espnow_data_t;
 
 
@@ -111,10 +113,6 @@ typedef struct
 
 } espnow_send_param_t;
 
-typedef struct
-{
-    uint8_t len;
-    uint16_t data[FIELD_WIDTH*FIELD_LENGTH];
-} image_data_raw;
+
 
 #endif
