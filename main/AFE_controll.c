@@ -93,7 +93,7 @@ static uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] 
 static spi_transaction_t transaction_mock = {
         .rx_buffer = NULL,
         .tx_buffer = &data_mock,
-        .length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET,
+        .length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8,
         .rxlength = 0,
         .flags = 0
     };
@@ -119,7 +119,7 @@ uint8_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction
 {
     uint8_t response = 0;
     transaction_get_response->length = 16;
-    transaction_get_response->rx_buffer = &response;
+    transaction_get_response->rx_buffer = &response; 
     transaction_get_response->tx_buffer = NULL;
     transaction_get_response->rxlength = 16;
     spi_device_transmit(spi_device, transaction_get_response);
@@ -539,8 +539,8 @@ void Task_AFE_get_data()
     for(uint16_t i = 0; i < 300; i++)
     {
         transactions[transaction].tx_buffer = NULL;
-        transactions[transaction].length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET;
-        transactions[transaction].trans_len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET;
+        transactions[transaction].length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8;
+        transactions[transaction].trans_len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8;
         
     }
     
@@ -564,7 +564,7 @@ void Task_AFE_get_data()
         {
             // this error occurs when queue is empty so we can immediately skip to preparing more transactions
             if(ESP_ERR_TIMEOUT ==  spi_slave_get_trans_result(SPI3_HOST, &transaction_result, 0)) break; 
-            recieved_data = (transaction_result->rx_buffer);
+            recieved_data = (AFE_data*)(transaction_result->rx_buffer);
             // Checking  the header only for the first channel of an ADC, to verify if each ADC operates correctly
             for(uint8_t header = 0; header < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; header += AFE_NUM_OF_ADC_CH)
             {
@@ -616,7 +616,7 @@ void Task_init_AFE_tasks()
     // Initializing queue for AFE data
     for(;;){
         // Setting up test resources
-        memset(&data_mock, 0xAA, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+        memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
         // Setting up test resources
 
         uint8_t created_tasks = 0;

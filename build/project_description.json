@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "espnow_test",
-    "project_version":    "166c05c-dirty",
+    "project_version":    "be8af1a-dirty",
     "project_path":       "E:/Repos/diplomski/espnow_test/espnow_test",
     "idf_path":           "C:/Users/Gaspar/esp/v5.2.1/esp-idf",
     "build_dir":          "E:/Repos/diplomski/espnow_test/espnow_test/build",
@@ -730,7 +730,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "E:/Repos/diplomski/espnow_test/espnow_test/build/esp-idf/heap/libheap.a",
-            "sources": [ "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/heap_caps.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/heap_caps_init.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/multi_heap.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/tlsf/tlsf.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/port/memory_layout_utils.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/port/esp32s3/memory_layout.c" ],
+            "sources": [ "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/heap_caps.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/heap_caps_init.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/multi_heap.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/tlsf/tlsf.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/multi_heap_poisoning.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/port/memory_layout_utils.c", "C:/Users/Gaspar/esp/v5.2.1/esp-idf/components/heap/port/esp32s3/memory_layout.c" ],
             "include_dirs": [ "include" ]
         },
         "http_parser": {

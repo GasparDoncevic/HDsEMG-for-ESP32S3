@@ -196,21 +196,16 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
         return;
     }
 
-    // evt.id = EXAMPLE_ESPNOW_SEND_CB;
-    // memcpy(send_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
-    // send_cb->status = status;
-    // if (xQueueSend(s_example_espnow_queue, &evt, ESPNOW_MAXDELAY) != pdTRUE) {
-    //     ESP_LOGW(TAG, "Send send queue fail");
-    // }
     espnow_send_param_t *data_dump = NULL;
     if(status == ESP_NOW_SEND_SUCCESS)
     {
-        //ESP_LOGI(USER_TAG, "Removing successfully sent data from queue");
+        ESP_LOGI(USER_TAG, "Removing successfully sent data from queue");
         xQueueReceive(queue_espnow_stage, &data_dump, portMAX_DELAY);
-        //ESP_LOGI(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
-        //ESP_LOGI(USER_TAG, "freeing send_param from memory at location %p", data_dump);
+        ESP_LOGI(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
+        ESP_LOGI(USER_TAG, "freeing send_param from memory at location %p", data_dump);
+        //TEST_espnow_data_print(data_dump->buffer);
         free((espnow_data_t *)(data_dump->buffer));
-        free(data_dump);
+        free((espnow_send_param_t *)data_dump);
     }
     //ESP_LOGI(USER_TAG, "Giving back semaphore");
     xSemaphoreGive(semaphore_send);
@@ -267,7 +262,7 @@ void espnow_data_prep_task(void *pv_parameters)
         if (send_parameters == NULL) {
             ESP_LOGE(TAG, "Malloc send parameter fail");
         }
-        //ESP_LOGI(USER_TAG, "data_prep_task: creating new instance of send parameters at address %p", send_parameters);
+        ESP_LOGI(USER_TAG, "data_prep_task: creating new instance of send parameters at address %p", send_parameters);
         //memset(send_parameters, 0, sizeof(espnow_send_param_t));
         //send_parameters->unicast = false;
         send_parameters->broadcast = true;
@@ -289,18 +284,18 @@ void espnow_data_prep_task(void *pv_parameters)
         //ESP_LOGI(USER_TAG, "data_prep_task: Taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
         ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue");
-        xQueueReceive(queue_image, &image_data, portMAX_DELAY/portTICK_PERIOD_MS);
+        xQueueReceive(queue_image, &image_data, portMAX_DELAY);
         //ESP_LOGI(USER_TAG, "data_prep_task: giving image semaphore");
         //xSemaphoreGive(semaphore_image);
         espnow_data_t *buf = send_parameters->buffer;
-        //ESP_LOGI(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
-        //ESP_LOGI(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
-        memcpy(buf->payload, image_data, IMAGE_SIZE*2);
-        //ESP_LOGI(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
+        ESP_LOGI(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
+        ESP_LOGI(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
+        memcpy(buf->payload, image_data, AFE_NUM_OF_ADC * AFE_NUM_OF_ADC_CH);
+        ESP_LOGI(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
         free(image_data);
 
-        //ESP_LOGI(USER_TAG, "size of send_parameters->len: %d", send_parameters->len);
-        //ESP_LOGI(USER_TAG, "size of espnow_data: %d", sizeof(espnow_data_t));
+        ESP_LOGI(USER_TAG, "size of send_parameters->len: %d", send_parameters->len);
+        ESP_LOGI(USER_TAG, "size of espnow_data: %d", sizeof(espnow_data_t));
         assert(send_parameters->len >= sizeof(*buf));
         
 
@@ -312,7 +307,7 @@ void espnow_data_prep_task(void *pv_parameters)
         buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
 
         //send_parameters->buffer = buf;
-        //ESP_LOGI(USER_TAG, "Data_prep_task: Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
+        ESP_LOGI(USER_TAG, "Data_prep_task: Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
         //TEST_espnow_data_print(buf);
         //TEST_espnow_data_print(send_parameters->buffer);
         //is there a way to notify if the queue is full?
@@ -335,8 +330,8 @@ void espnow_send_data_task(void *pv_parameters)
         ESP_LOGI(USER_TAG ,"send_data_task: Taking data from queue");
         xQueuePeek(queue_espnow_stage, &send_parameters, portMAX_DELAY);
         //TEST_espnow_data_print(send_parameters->buffer);
-        //ESP_LOGI(USER_TAG, "send_data_task: address of received send_parameters %p", send_parameters);
-        //ESP_LOGI(USER_TAG, "send_data_task: Send espnow_data from location %p", (send_parameters->buffer));
+        ESP_LOGI(USER_TAG, "send_data_task: address of received send_parameters %p", send_parameters);
+        ESP_LOGI(USER_TAG, "send_data_task: Send espnow_data from location %p", (send_parameters->buffer));
         if (esp_now_send(send_parameters->dest_mac, (uint8_t *)(send_parameters->buffer), send_parameters->len) != ESP_OK)
         {
             ESP_LOGE(USER_TAG, "send_data_task: Failed to send data to destination address");
@@ -350,8 +345,8 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
 {
     for(;;)
     {   
-        uint16_t *image = malloc(IMAGE_SIZE*2);
-        memset(image, 0x0A, 32);
+        uint16_t *image = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
+        memset(image, 0x0A, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
         ESP_LOGI(USER_TAG, "data staging task: generating new image data at location %p", (void *) image);
         //ESP_LOGI(USER_TAG, "data staging task: taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
@@ -359,7 +354,7 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
         xQueueSend(queue_image, &image, portMAX_DELAY/portTICK_PERIOD_MS);
         //ESP_LOGI(USER_TAG, "data staging task: giving image semaphore");
         //xSemaphoreGive(semaphore_image);
-        vTaskDelay(1/portTICK_PERIOD_MS);
+        vTaskDelay(500/portTICK_PERIOD_MS);
     }
 }
 
@@ -377,8 +372,8 @@ void xinit_send_data_tasks()
     espnow_send_param_t *pv_parameters = NULL;
     if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
     if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
-    //if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1) == pdPASS) task_count++;
-    if(task_count == 2)
+    if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1) == pdPASS) task_count++;
+    if(task_count == 3)
     {
         ESP_LOGI(USER_TAG, "All tasks were created successfully!");
     }else
@@ -513,7 +508,7 @@ void app_main(void)
     //TEST_GPIO();
     //TEST_CLKSRC();
     //TEST_SPI();
-    xTaskCreatePinnedToCore(Task_init_AFE_tasks, "TASK_init_AFE_tasks", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 1);
+    //xTaskCreatePinnedToCore(Task_init_AFE_tasks, "TASK_init_AFE_tasks", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 1);
     
     
 
