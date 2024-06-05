@@ -13,7 +13,7 @@ typedef struct
 {
     uint8_t len;
     uint16_t data[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH];
-} image_data_raw;
+} image_data_raw_t;
 
 
 typedef enum
@@ -31,5 +31,6 @@ void Task_init_AFE_tasks();
 void TEST_SPI();
 void TEST_GPIO();
 void TEST_CLKSRC();
+void TEST_GPtimer();
 
 #endif

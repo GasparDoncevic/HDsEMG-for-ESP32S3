@@ -100,6 +100,8 @@ typedef struct
     uint16_t crc;                         //CRC16 value of ESPNOW data.
     uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
     uint16_t payload[AFE_NUM_OF_ADC * AFE_NUM_OF_ADC_CH]; // data payload to be sent via espnow
+    uint8_t len_payload;
+    
 } PACKED_ATTR espnow_data_t;
 
 

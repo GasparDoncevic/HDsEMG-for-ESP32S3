@@ -57,6 +57,8 @@ TaskHandle_t espnow_data_prep_taskHandle = NULL;
 TaskHandle_t TEST_espnow_stage_data_taskhandle = NULL;
 TaskHandle_t init_tasks_handle = NULL;
 TaskHandle_t Handle_Task_AFE_init_tasks = NULL;
+TaskHandle_t Handle_TEST_data_transfer_send = NULL;
+TaskHandle_t Handle_TEST_data_transfer_recv = NULL;
 
 QueueHandle_t queue_image = NULL; // queue for raw image data, between memory location and data prep task
 static QueueHandle_t queue_espnow_stage = NULL; // queue for send data, between data prep task and send task
@@ -220,7 +222,7 @@ static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_
     // example_espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
     // uint8_t * mac_addr = recv_info->src_addr;
     // uint8_t * des_addr = recv_info->des_addr;
-    // image_data_raw image_data;
+    // image_data_raw_t image_data;
 
     if (recv_info->src_addr == NULL || data == NULL || len <= 0) {
         ESP_LOGE(USER_TAG, "Receive cb arg error");
@@ -280,17 +282,23 @@ void espnow_data_prep_task(void *pv_parameters)
         
         
         //espnow_data *buf = (espnow_data *) send_parameters->buffer;
-        uint16_t *image_data = NULL;
+        image_data_raw_t *image_data = NULL;
         //ESP_LOGI(USER_TAG, "data_prep_task: Taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
         ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue");
-        xQueueReceive(queue_image, &image_data, portMAX_DELAY);
+        if (pdFAIL == xQueueReceive(queue_image, &image_data, portMAX_DELAY))
+        {
+            ESP_LOGE(USER_TAG, "Failed to indefinitely block on queue recieve");
+        }
         //ESP_LOGI(USER_TAG, "data_prep_task: giving image semaphore");
         //xSemaphoreGive(semaphore_image);
         espnow_data_t *buf = send_parameters->buffer;
+
         ESP_LOGI(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
         ESP_LOGI(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
-        memcpy(buf->payload, image_data, AFE_NUM_OF_ADC * AFE_NUM_OF_ADC_CH);
+        ESP_LOGI(USER_TAG, "The fetched image data is located on %p", &(image_data->data));
+        memcpy(&(buf->payload), &(image_data->data), AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH);
+        buf->len_payload = image_data->len;
         ESP_LOGI(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
         free(image_data);
 
@@ -372,8 +380,8 @@ void xinit_send_data_tasks()
     espnow_send_param_t *pv_parameters = NULL;
     if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
     if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
-    if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1) == pdPASS) task_count++;
-    if(task_count == 3)
+    //if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1) == pdPASS) task_count++;
+    if(task_count == 2)
     {
         ESP_LOGI(USER_TAG, "All tasks were created successfully!");
     }else
@@ -401,7 +409,7 @@ void xinit_send_data_tasks()
 void espnow_receive_data_task()
 {   for(;;)
     {
-        image_data_raw image_data;
+        image_data_raw_t image_data;
         //uint8_t *data = NULL;
         ESP_LOGD(USER_TAG, "Reading data from com_queue for data receptioon task: receive_data_task");
         xQueueReceive(queue_espnow_stage, &image_data, portMAX_DELAY);
@@ -424,7 +432,7 @@ void espnow_parse_data_task()
 {
     for(;;)
     {
-        image_data_raw *image_data = NULL;
+        image_data_raw_t *image_data = NULL;
         xQueueReceive(queue_image, image_data, portMAX_DELAY);
         ESP_LOGI(USER_TAG, "received image size of %d", image_data->len);
         for(int i = 0; i < image_data->len; i++)
@@ -492,6 +500,54 @@ void TEST_espnow_data_print(espnow_data_t* data)
     return;
 }
 
+void TEST_data_transfer_recv(QueueHandle_t queue)
+{
+    uint32_t i = 0;
+    for(;;)
+    {
+        
+        uint32_t * value = malloc(sizeof(uint32_t));
+        *value = i;
+        ESP_LOGI(USER_TAG, "Sending allocated data on location %p witch value %ud from core 0", value, (unsigned int)*value);
+        xQueueSend(queue, &value, portMAX_DELAY);
+        i++;
+        vTaskDelay(500/portTICK_PERIOD_MS);
+    }
+    
+
+}
+void TEST_data_transfer_send(QueueHandle_t queue)
+{
+    for(;;)
+    {   
+        uint32_t * recv_val = NULL;
+        xQueueReceive(queue, &recv_val, portMAX_DELAY);
+        ESP_LOGI(USER_TAG, "Recieved data on on core 1 from address %p with data %ud", recv_val, (unsigned int)*recv_val);
+        vTaskDelay(200/portTICK_PERIOD_MS); 
+    }
+
+}
+
+void TEST_data_transfer_init()
+{
+     QueueHandle_t queue_TEST = xQueueCreate(200, sizeof(uint32_t));
+     xTaskCreatePinnedToCore(TEST_data_transfer_send, "Send_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_send, 0);
+     xTaskCreatePinnedToCore(TEST_data_transfer_recv, "Recieve_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_recv, 1);
+
+    for(;;)
+    {
+        vTaskDelay(300000/portTICK_PERIOD_MS);
+    }
+     
+}
+
+void Start_App()
+{
+    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
+    xTaskCreatePinnedToCore(Task_init_AFE_tasks, "TASK_init_AFE_tasks", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 1);
+    return;
+}
+
 void app_main(void)
 {
     // Initialize NVS
@@ -503,12 +559,14 @@ void app_main(void)
     ESP_ERROR_CHECK( ret );
 
     // Creating task for testing espnow
-    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
+    
     //Creating task for initializing and testing SPI
     //TEST_GPIO();
     //TEST_CLKSRC();
     //TEST_SPI();
-    //xTaskCreatePinnedToCore(Task_init_AFE_tasks, "TASK_init_AFE_tasks", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 1);
+    //Start_App();
+    TEST_GPtimer();
+    //xTaskCreatePinnedToCore(TEST_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
     
 
