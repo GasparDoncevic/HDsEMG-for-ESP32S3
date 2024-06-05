@@ -564,8 +564,8 @@ void app_main(void)
     //TEST_GPIO();
     //TEST_CLKSRC();
     //TEST_SPI();
-    //Start_App();
-    TEST_GPtimer();
+    Start_App();
+    //TEST_GPtimer();
     //xTaskCreatePinnedToCore(TEST_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
     

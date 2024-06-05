@@ -88,6 +88,7 @@ TaskHandle_t Handle_Task_TEST_loopback_sender = NULL;
 TaskHandle_t Handle_Task_TEST_GPIO = NULL;
 TaskHandle_t Handle_Task_TEST_CLKSRC = NULL;
 TaskHandle_t Handle_TEST_Task_gen_data = NULL;
+//uint32_t TEST_data = 0;
 
 // TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
 static uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] = {0xAA};
@@ -288,18 +289,27 @@ void TEST_Task_generate_data_w_SPI()
         {
             ESP_LOGI(TAG_AFE, "sending new data via SPI");
         }
-
+        vTaskDelay(500/portTICK_PERIOD_MS);
         
     }
 }
+void TEST_GPTIMER__Task_printoutData()
+{
+    for(;;)
+    {
+        //ESP_LOGI(TAG_AFE,"Our data is at value %u", (unsigned int)TEST_data);
+        vTaskDelay(500/portTICK_PERIOD_MS);
+    }
+}
+
 void TEST_MOCK_AFE_create_data()
 {
     
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    ESP_LOGI(TAG_AFE, "Giving back generator semaphore");
+    //ESP_LOGI(TAG_AFE, "Giving back generator semaphore");
     if (pdTRUE != xSemaphoreGiveFromISR(semaphore_generator, &xHigherPriorityTaskWoken))
     {
-        ESP_LOGE(TAG_AFE, "Failed to give back semaphore");
+        //ESP_LOGE(TAG_AFE, "Failed to give back semaphore");
         return;
     }
     //spi_device_transmit(spi_master[0], &transaction_mock);
@@ -311,42 +321,50 @@ void TEST_MOCK_AFE_create_data()
     return;
 }
 
-void TEST_GPTimer_hello()
-{
-    ESP_LOGI(TAG_AFE, "Hello from timer interrupt");
-}
+
 
 void Timer_sync_alarm()
 {
     // this code is commented out during testing without AFE hardware
     //AFE_sync_chain();
     //AFE_sync_chain();
-    ESP_LOGI(TAG_AFE, "Hello from timer alarm");
-    TEST_GPTimer_hello();
-    //TEST_MOCK_AFE_create_data();
+    //ESP_LOGI(TAG_AFE, "Hello from timer alarm");
+    //TEST_GPTimer_hello();
+    TEST_MOCK_AFE_create_data();
+    //TEST_data++;
 }
 
 esp_err_t AFE_Init_Sync_timer()
 {
-    gptimer_config_t gptimer_config ={
+    ESP_LOGI(TAG_AFE, "Starting GPtimer init");
+    gptimer_config_t gptimer_config;/* ={
         .clk_src= GPTIMER_CLK_SRC_APB,
         .direction = GPTIMER_COUNT_UP,
         .resolution_hz = 10000,
         .intr_priority = 0 // this sets the interrupt priority to the lowest priorities
-    };
-    gptimer_alarm_config_t gptimer_alarm = {
+    }; */
+    gptimer_config.clk_src = GPTIMER_CLK_SRC_APB;
+    gptimer_config.direction = GPTIMER_COUNT_UP;
+    gptimer_config.resolution_hz = 1000*10;
+    gptimer_config.intr_priority = 0;
+    gptimer_alarm_config_t gptimer_alarm; /* = {
         .alarm_count = 10000/2000,
         .flags.auto_reload_on_alarm = true,
         .reload_count = 0,
-    };
+    }; */
+    gptimer_alarm.alarm_count = 10000/2000;
+    gptimer_alarm.flags.auto_reload_on_alarm = true;
+    gptimer_alarm.reload_count = 0;
 
     ESP_ERROR_CHECK(gptimer_new_timer(&gptimer_config, &gptimer));
-    gptimer_event_callbacks_t callback = {
+    gptimer_event_callbacks_t callback; /* = {
         .on_alarm = Timer_sync_alarm
-    };
+    }; */
+    callback.on_alarm = (void*)Timer_sync_alarm;
 
+    ESP_LOGI(TAG_AFE, "starting timer");
     // Generating semaphore which will be used for the task
-    //semaphore_generator = xSemaphoreCreateBinary();
+    semaphore_generator = xSemaphoreCreateBinary();
 
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &callback, NULL));
     ESP_ERROR_CHECK(gptimer_enable(gptimer));
@@ -355,7 +373,8 @@ esp_err_t AFE_Init_Sync_timer()
 
 
     // generating task which will send new data via SPI
-    //xTaskCreatePinnedToCore(TEST_Task_generate_data_w_SPI, "Generate_data_w_spi", 3000, NULL, PRIORITY_TASK_STAGE_DATA +5, &Handle_TEST_Task_gen_data, 1);
+    //xTaskCreatePinnedToCore(TEST_GPTIMER__Task_printoutData, "Generate_data_w_spi", 3000, NULL, PRIORITY_TASK_STAGE_DATA +5, &Handle_TEST_Task_gen_data, 1);
+    xTaskCreatePinnedToCore(TEST_Task_generate_data_w_SPI, "Generate_data_w_spi", 3000, NULL, PRIORITY_TASK_STAGE_DATA +5, &Handle_TEST_Task_gen_data, 1);
     ESP_LOGI(TAG_AFE, "GPTimer and task configured");
 
     return ESP_OK;

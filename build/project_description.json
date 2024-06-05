@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "espnow_test",
-    "project_version":    "83aa69c-dirty",
+    "project_version":    "8118ad2-dirty",
     "project_path":       "E:/Repos/diplomski/espnow_test/espnow_test",
     "idf_path":           "C:/Users/Gaspar/esp/v5.2.1/esp-idf",
     "build_dir":          "E:/Repos/diplomski/espnow_test/espnow_test/build",
