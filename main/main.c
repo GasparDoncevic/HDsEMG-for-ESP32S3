@@ -337,7 +337,7 @@ void espnow_send_data_task(void *pv_parameters)
 
         ESP_LOGI(USER_TAG ,"send_data_task: Taking data from queue");
         xQueuePeek(queue_espnow_stage, &send_parameters, portMAX_DELAY);
-        //TEST_espnow_data_print(send_parameters->buffer);
+        TEST_espnow_data_print(send_parameters->buffer);
         ESP_LOGI(USER_TAG, "send_data_task: address of received send_parameters %p", send_parameters);
         ESP_LOGI(USER_TAG, "send_data_task: Send espnow_data from location %p", (send_parameters->buffer));
         if (esp_now_send(send_parameters->dest_mac, (uint8_t *)(send_parameters->buffer), send_parameters->len) != ESP_OK)
@@ -349,12 +349,14 @@ void espnow_send_data_task(void *pv_parameters)
     }
 }
 
+// Task generate
 void TEST_espnow_stage_data_task(void *pv_parameters)
 {
     for(;;)
     {   
-        uint16_t *image = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
-        memset(image, 0x0A, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
+        image_data_raw_t *image = malloc(sizeof(image_data_raw_t));
+        memset(&(image->data), 0x0A, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
+        image->len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH;
         ESP_LOGI(USER_TAG, "data staging task: generating new image data at location %p", (void *) image);
         //ESP_LOGI(USER_TAG, "data staging task: taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
@@ -491,8 +493,9 @@ void TEST_espnow_data_print(espnow_data_t* data)
         ESP_LOGI(USER_TAG, "Boradcast type is UNICAST");
     }
 
+    ESP_LOGI(USER_TAG, "Payload size is %d", data->len_payload);
     // max size of the structure for now is 42 and the last 32 bytes are payload data packed in uint16_t type
-    for(int i = 0; i < 16; i++)
+    for(int i = 0; i < data->len_payload; i++)
     {
         ESP_LOGI(USER_TAG, "the %dth payload data is %d", i ,(int)(data->payload[i]));
     }   
