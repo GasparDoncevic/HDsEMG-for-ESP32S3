@@ -297,6 +297,7 @@ void espnow_data_prep_task(void *pv_parameters)
         ESP_LOGI(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
         ESP_LOGI(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
         ESP_LOGI(USER_TAG, "The fetched image data is located on %p", &(image_data->data));
+
         memcpy(&(buf->payload), &(image_data->data), AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH);
         buf->len_payload = image_data->len;
         ESP_LOGI(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
@@ -497,7 +498,7 @@ void TEST_espnow_data_print(espnow_data_t* data)
     // max size of the structure for now is 42 and the last 32 bytes are payload data packed in uint16_t type
     for(int i = 0; i < data->len_payload; i++)
     {
-        ESP_LOGI(USER_TAG, "the %dth payload data is %d", i ,(int)(data->payload[i]));
+        ESP_LOGI(USER_TAG, "the %dth payload data is 0x%x", i ,(uint16_t)(data->payload[i]));
     }   
 
     return;

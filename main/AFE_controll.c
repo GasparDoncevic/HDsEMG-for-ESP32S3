@@ -91,8 +91,8 @@ TaskHandle_t Handle_TEST_Task_gen_data = NULL;
 //uint32_t TEST_data = 0;
 
 // TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
-static uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] = {0xAA};
-static spi_transaction_t transaction_mock = {
+uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] = {0xAA};
+spi_transaction_t transaction_mock = {
         .rx_buffer = NULL,
         .tx_buffer = &data_mock,
         .length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8,
@@ -313,6 +313,12 @@ void TEST_Task_generate_data_w_SPI()
         ESP_LOGI(TAG_AFE, "Taking semaphore to generate new data and send to SPI");
         xSemaphoreTake(semaphore_generator, portMAX_DELAY);
         ESP_LOGI(TAG_AFE, "Generator semaphore Taken");
+       // ESP_LOGI(TAG_AFE, "Sending transaciton located on %p which has data on %p", &transaction_mock, &data_mock);
+       /*  for (uint8_t i = 0; i < sizeof(AFE_data_t); i++)
+        {
+            ESP_LOGI(TAG_AFE, "Data to send is 0x%x", data_mock[i] ); 
+        } */
+
         if (ESP_OK != spi_device_queue_trans(spi_master[0], &transaction_mock, 0))
         {
             ESP_LOGE(TAG_AFE, "Failed to queue data to spi master ");
@@ -320,7 +326,7 @@ void TEST_Task_generate_data_w_SPI()
         {
             ESP_LOGI(TAG_AFE, "sending new data via SPI");
         }
-        vTaskDelay(500/portTICK_PERIOD_MS);
+        vTaskDelay(1);
         
     }
 }
@@ -380,7 +386,7 @@ esp_err_t AFE_Init_Sync_timer()
         .flags.auto_reload_on_alarm = true,
         .reload_count = 0,
     }; */
-    gptimer_alarm.alarm_count = 10000/2000; // sets the value when the alarm triggers, a second will have 10000 ticks, and the needed mock ODR is 2kSPs (2000)
+    gptimer_alarm.alarm_count = 10000/TEST_GEN_ODR; // sets the value when the alarm triggers, a second will have 10000 ticks, and the needed mock ODR is 2kSPs (2000)
     gptimer_alarm.flags.auto_reload_on_alarm = true; // when alarm is triggered, count is reloaded
     gptimer_alarm.reload_count = 0; // count autoreloads to 0
 
@@ -428,7 +434,7 @@ esp_err_t AFE_config_clk_source()
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_1_BIT,  // this parameter needs to adapt in order to allow high neough frequency
         .timer_num = LEDC_TIMER_0,
-        .freq_hz =  AFE_MCLK, //40000000, // set to 40MHz
+        .freq_hz =  AFE_MCLK,  // set to 32MHz
         .clk_cfg =  LEDC_AUTO_CLK
     };
     ESP_ERROR_CHECK(ledc_timer_config(&AFE_clk_source));
@@ -633,6 +639,7 @@ void Task_AFE_get_data()
     uint16_t transaction = 0;
     spi_slave_transaction_t* transaction_result = NULL;
     AFE_data_t *recieved_data;
+    bool is_data_valid = true;
 
     vTaskDelay(1000/portTICK_PERIOD_MS);
     // This portion of the code handles the creation of the slave transactions
@@ -643,8 +650,7 @@ void Task_AFE_get_data()
         transactions[i].tx_buffer = NULL;
         transactions[i].length = (unsigned int) AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8;
         transactions[i].trans_len = (unsigned int) AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8;
-
-        
+        transactions[i].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
     }
     
     
@@ -660,7 +666,7 @@ void Task_AFE_get_data()
             // We will check if we can queue data
             if(ESP_OK != spi_slave_queue_trans(SPI3_HOST, (spi_slave_transaction_t*) &transactions[transaction], 0))
             {
-                ESP_LOGE(TAG_AFE, "Failed to queue spi transaction");
+                ESP_LOGE(TAG_AFE, "Failed to queue spi slave transaction");
                 break;
             }
             transaction++;
@@ -671,10 +677,11 @@ void Task_AFE_get_data()
         // this portion handles recieveing results and passing valid data to datat staging via queue
         for (uint8_t i = 0; i < 200; i++)
         {
+            is_data_valid = true;
             // this error occurs when queue is empty so we can immediately skip to preparing more transactions
             if(ESP_ERR_TIMEOUT ==  spi_slave_get_trans_result(SPI3_HOST, &transaction_result, 0))
             {
-                ESP_LOGE(TAG_AFE, "Failed to queue spi transaction result");
+                ESP_LOGE(TAG_AFE, "Failed to get spi slave transaction result");
                 break; 
             }
             recieved_data = (AFE_data_t*)(transaction_result->rx_buffer);
@@ -683,19 +690,26 @@ void Task_AFE_get_data()
             for(uint8_t header = 0; header < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; header += AFE_NUM_OF_ADC_CH)
             {
                 if ((0xE0 & recieved_data->data[header]) != 0){
-                    ESP_LOGW(TAG_AFE, "Data packet has an error flag raised, has unsettled filter or repeated data, dropping data packet");
-                    continue;
+                    ESP_LOGE(TAG_AFE, "Data packet has an error flag raised, has unsettled filter or repeated data, dropping whole image data");
+                    is_data_valid = false;
+                    break;
                 }
             }
             // the malloc call needs to happen somewhere here because it would be nice if i could malloc after i decide if I even want to keep the data
+            ESP_LOGI(TAG_AFE, "Sending data to queue");
             AFE_data_t *data = malloc(sizeof(AFE_data_t));
             memcpy(data, recieved_data, sizeof(AFE_data_t));
             //transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
-             if (pdFALSE == xQueueSend(queue_AFE_data, &data, 0))
-             {
-                ESP_LOGE(TAG_AFE, "Error in sending data to trasaction queue. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
-                
-             }
+            ESP_LOGI(TAG_AFE, "Sending data to queue");
+            if(is_data_valid == true)
+            {
+                if (pdFALSE == xQueueSend(queue_AFE_data, &data, 0))
+                {
+                    ESP_LOGE(TAG_AFE, "Error in sending data to trasaction queue. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
+                    
+                }
+            }
+             
 
         }
         vTaskDelay(2);
@@ -783,7 +797,7 @@ void Task_init_AFE_tasks()
 // spi3 is slave, spi2 is master
 void Task_TEST_loopback_sender()
 {   
-    bool use_command = true;
+    bool use_command = false;
     spi_transaction_t data_spi2;
     memset(&data_spi2, 0, sizeof(spi_transaction_t));
     uint8_t data[2] = {0x04, 0x04};
@@ -795,7 +809,7 @@ void Task_TEST_loopback_sender()
         if(use_command == false)
         {
             ESP_LOGI(TAG_AFE, "Sending data via spi on master device");
-            spi_device_transmit(spi_master[0], &data_spi2);
+            spi_device_transmit(spi_master[0], &transaction_mock);
             vTaskDelay(500/portTICK_PERIOD_MS);
             data[1]++;
         }else
@@ -812,9 +826,10 @@ void Task_TEST_loopback_receiver()
 {
     spi_slave_transaction_t data_spi3;
     memset(&data_spi3, 0, sizeof(spi_slave_transaction_t));
+    uint8_t data[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET];
     uint16_t recieved_data = 0;
-    data_spi3.length = 16;
-    data_spi3.rx_buffer = &recieved_data;
+    data_spi3.length = sizeof(AFE_data_t)*8;
+    data_spi3.rx_buffer = &data;
     data_spi3.tx_buffer = NULL;
     spi_slave_transaction_t * spi_result = NULL;
     //A delay needs to be added for the slave configuration
@@ -830,7 +845,12 @@ void Task_TEST_loopback_receiver()
 
         
         spi_slave_get_trans_result(SPI3_HOST, &spi_result, portMAX_DELAY);
-        ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer)) ); 
+        ESP_LOGI(TAG_AFE, "Recieved new packet");
+        for (uint8_t i = 0; i < sizeof(AFE_data_t)/2; i++)
+        {
+            ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer) +1) ); 
+        }
+        
         vTaskDelay(100);
     }
 }
@@ -839,7 +859,7 @@ void TEST_spi_loopback()
     
     
     xTaskCreatePinnedToCore(Task_TEST_loopback_receiver, "Receiver", 3000, NULL, 3, &Handle_Task_TEST_loopback_receiver, 0);
-    xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, 3, &Handle_Task_TEST_loopback_sender, 1);
+    //xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, 3, &Handle_Task_TEST_loopback_sender, 1);
     for(;;)
     {
         vTaskDelete(NULL);    
@@ -854,6 +874,9 @@ void TEST_spi_loopback()
 
 void TEST_SPI()
 {
+    // Filling up test resource
+    memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+    // Filling up test resource
     xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
     xTaskCreatePinnedToCore(TEST_spi_loopback, "TEST_spi_loop", 3000, NULL, 6, &Handle_TEST_spi_loop, 1);
 
