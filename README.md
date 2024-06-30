@@ -1,9 +1,13 @@
-#ESP-NOW example (esp32S3-DevkitC-1)
+##Masters Thesis:\n Designing a new generation system for High Density surface Electromyography  
 
-this example project is modified o work with the newer esp32-S3-DevKitC-1 board.
-it uses ESP-IDF: 5.2.1 and ESP-NOW component: 2.5.0
+This firmware is for a new generation HDsEMG system developed for my master's thesis.
+The whole project is currently in the dev_datastream branch and will be merged with the main branch in the future. For now the master branch contains the fixed esp32-s3 espnow example from espressif.
 
-the major issue with the previous version of the example project is that the plugins for VSCode do not work proprely nad some parameters need to be fixed manualy.
-My example fixes the stack overflow issue witihin the example_espnow_task, by increasing the task stack from 2048 bytes to 8048 bytes.
+The code is divided into multiple .c and .h files. Each .c and .h file is dedicated to one subsystem of the acquisition system.
+The designed sytem is divided into two subsystems:
+    AFE (Analog Front End) controll
+    wireless communication via espnow
 
-This is a small improvement intended as a starting point for other ESPNOW projects 
+The system works currently with a variable length of electrode arrays and works at a sample rate of 1 kSps. Data grouping for wireless trasmission will be implemented in the near future to enable higher sample rates.
+This readme should be expanded pretty soon too, but this will do for now.
+Come back soon to see how this project continues to grow
