@@ -1,4 +1,4 @@
-##Masters Thesis:\n Designing a new generation system for High Density surface Electromyography  
+# Masters Thesis:\ Designing a new generation system for High Density surface Electromyography  
 
 This firmware is for a new generation HDsEMG system developed for my master's thesis.
 The whole project is currently in the dev_datastream branch and will be merged with the main branch in the future. For now the master branch contains the fixed esp32-s3 espnow example from espressif.
