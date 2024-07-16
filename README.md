@@ -5,8 +5,8 @@ The whole project is currently in the dev_datastream branch and will be merged w
 
 The code is divided into multiple .c and .h files. Each .c and .h file is dedicated to one subsystem of the acquisition system.
 The designed sytem is divided into two subsystems:
-    AFE (Analog Front End) controll
-    wireless communication via espnow
+   - AFE (Analog Front End) controll
+   - wireless communication via espnow
 
 The system works currently with a variable length of electrode arrays and works at a sample rate of 1 kSps. Data grouping for wireless trasmission will be implemented in the near future to enable higher sample rates.
 This readme should be expanded pretty soon too, but this will do for now.
