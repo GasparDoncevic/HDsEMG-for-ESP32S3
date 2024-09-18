@@ -10,9 +10,40 @@
     "idf.espIdfPathWin": "C:\\Users\\Gaspar\\esp\\v5.2.1\\esp-idf",
     "idf.openOcdConfigs": [
         "interface/ftdi/esp32_devkitj_v1.cfg",
-        "target/esp32.cfg"
+        "target/esp32s3.cfg"
     ],
     "idf.portWin": "COM3",
     "idf.pythonBinPathWin": "C:\\Users\\Gaspar\\.espressif\\python_env\\idf5.2_py3.11_env\\Scripts\\python.exe",
-    "idf.toolsPathWin": "C:\\Users\\Gaspar\\.espressif"
+    "idf.toolsPathWin": "C:\\Users\\Gaspar\\.espressif",
+    "idf.flashType": "UART",
+    "files.associations": {
+        "stdlib.h": "c",
+        "freertos.h": "c",
+        "freertosconfig.h": "c",
+        "semphr.h": "c",
+        "array": "c",
+        "atomic": "c",
+        "bit": "c",
+        "*.tcc": "c",
+        "bitset": "c",
+        "chrono": "c",
+        "concepts": "c",
+        "deque": "c",
+        "list": "c",
+        "vector": "c",
+        "functional": "c",
+        "memory_resource": "c",
+        "optional": "c",
+        "string_view": "c",
+        "type_traits": "c",
+        "random": "c",
+        "format": "c",
+        "istream": "c",
+        "span": "c",
+        "system_error": "c",
+        "regex": "c",
+        "tuple": "c",
+        "variant": "c"
+    },
+    "idf.gitPathWin": "C:\\Users\\Gaspar\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }

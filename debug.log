@@ -1,0 +1,4 @@
+2024-05-06 23:12:52,084 - Debug Adapter (main) - CRITICAL - Debug adapter -> Extension: DEBUG_ADAPTER_STARTED
+2024-05-06 23:12:52,107 - Debug Adapter (main) - CRITICAL - Debug adapter -> Extension: DEBUG_ADAPTER_READY2CONNECT
+2024-05-06 23:13:04,905 - Debug Adapter (main) - CRITICAL - Debug adapter -> Extension: DEBUG_ADAPTER_STOPPED
+[0517/115050.841:ERROR:registration_protocol_win.cc(107)] CreateFile: The system cannot find the file specified. (0x2)

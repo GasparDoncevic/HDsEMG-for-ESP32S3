@@ -5,6 +5,7 @@
       "type": "espidf",
       "name": "Launch",
       "request": "launch"
+
     }
   ]
 }
