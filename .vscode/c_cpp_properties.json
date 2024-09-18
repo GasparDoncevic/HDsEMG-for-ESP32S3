@@ -5,18 +5,18 @@
             "compilerPath": "${config:idf.toolsPathWin}\\tools\\xtensa-esp-elf\\esp-13.2.0_20230928\\xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
             "compileCommands": "${workspaceFolder}/build/compile_commands.json",
             "includePath": [
-                "${config:idf.espIdfPath}/components/**",
-                "${config:idf.espIdfPathWin}/components/**",
-                "${config:idf.espAdfPath}/components/**",
-                "${config:idf.espAdfPathWin}/components/**",
+                "${config:idf.espIdfPath}/managed_components/**",
+                "${config:idf.espIdfPathWin}/managed_components/**",
+                "${config:idf.espAdfPath}/managed_components/**",
+                "${config:idf.espAdfPathWin}/managed_components/**",
                 "${workspaceFolder}/**"
             ],
             "browse": {
                 "path": [
-                    "${config:idf.espIdfPath}/components",
-                    "${config:idf.espIdfPathWin}/components",
-                    "${config:idf.espAdfPath}/components/**",
-                    "${config:idf.espAdfPathWin}/components/**",
+                    "${config:idf.espIdfPath}/managed_components",
+                    "${config:idf.espIdfPathWin}/managed_components",
+                    "${config:idf.espAdfPath}/managed_components/**",
+                    "${config:idf.espAdfPathWin}/managed_components/**",
                     "${workspaceFolder}"
                 ],
                 "limitSymbolsToIncludedHeaders": false
