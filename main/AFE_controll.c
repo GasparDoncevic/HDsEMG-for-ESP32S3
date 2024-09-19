@@ -65,8 +65,8 @@
 
 
 #define PRIORITY_TASK_GET_DATA 5
-#define PRIORITY_TASK_STAGE_DATA 5
-#define PRIORITY_TASK_SEND_CMD 6
+#define PRIORITY_TASK_STAGE_DATA 6
+#define PRIORITY_TASK_SEND_CMD 7
 #define SIZE__SPI_SLAVE_QUEUE 300
 
 // strucutre for data which will be recieved by spi slave
@@ -326,7 +326,9 @@ void TEST_Task_generate_data_w_SPI()
         {
             ESP_LOGI(TAG_AFE, "sending new data via SPI");
         }
-        vTaskDelay(1000);
+        // a taskYield is needed here to be invoked
+        //taskYIELD();
+        //vTaskDelay(1000);
         
     }
 }
@@ -712,7 +714,7 @@ void Task_AFE_get_data()
              
 
         }
-        vTaskDelay(2);
+        //vTaskDelay(2);
     }
 
 
@@ -730,7 +732,7 @@ void Task_AFE_stage_data()
         ESP_LOGI(TAG_AFE, "Getting unparsed data");
         xQueueReceive(queue_AFE_data, &unparsed_data ,portMAX_DELAY);
         uint16_t image_point = 0;
-        image_filtered.len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*(AFE_SIZE_DATA_PACKET-1);
+        image_filtered.len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH;
         // The format od the unparsed data is 1 byte header and 2 bytes data
         for(uint16_t byte = 1; byte < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; byte+=3)
         {

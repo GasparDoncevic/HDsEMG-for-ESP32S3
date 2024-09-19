@@ -31,6 +31,7 @@
 #include "esp_mac.h"
 #include "esp_now.h"
 #include "esp_crc.h"
+#include "driver/gptimer.h"
 #include "main.h"
 #include "AFE_controll.h"
 
@@ -50,7 +51,7 @@
 
 //USER PRIVATE VARIABLES
 bool run_example = false;
-uint8_t device_role = DEVICE_ROLE_RECIEVER;
+uint8_t device_role = DEVICE_ROLE_SENDER;
 
 TaskHandle_t espnow_send_data_taskHandle = NULL;
 TaskHandle_t espnow_data_prep_taskHandle = NULL;
@@ -65,6 +66,8 @@ static QueueHandle_t queue_espnow_stage = NULL; // queue for send data, between 
 SemaphoreHandle_t semaphore_send = NULL;
 SemaphoreHandle_t semaphore_receive = NULL;
 //SemaphoreHandle_t semaphore_image = NULL;
+static gptimer_handle_t TEST_gptimer = NULL;
+SemaphoreHandle_t TEST_semaphore_generator = NULL;
 
 static const char *USER_TAG = "user_espnow";
 //USER PRIVATE VARIABLES
@@ -164,12 +167,12 @@ static esp_err_t user_espnow_init(void)
     peer->ifidx = ESPNOW_WIFI_IF;
     peer->encrypt = false;
     memcpy(peer->peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-    // esp_now_rate_config_t *config = malloc(sizeof(esp_now_rate_config_t));
-    // config->phymode = WIFI_PHY_MODE_HT40; // HT stand for high throughput with a bandiwth of 40MHz
-    // config->rate = WIFI_PHY_RATE_MAX;
-    // config->dcm = false;
-    // config->ersu = false;
-    //esp_now_set_peer_rate_config(peer->peer_addr, config);
+    esp_now_rate_config_t *config = malloc(sizeof(esp_now_rate_config_t));
+    config->phymode = WIFI_PHY_MODE_HT40; // HT stand for high throughput with a bandiwth of 40MHz
+    config->rate = WIFI_PHY_RATE_MAX;
+    config->dcm = false;
+    config->ersu = false;
+    esp_now_set_peer_rate_config(peer->peer_addr, config);
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
     free(peer);
     //free(config);
@@ -192,7 +195,7 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
 {
     // example_espnow_event_t evt;
     // example_espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
-    ESP_LOGI(USER_TAG, "Entered send callback function");
+    ESP_LOGD(USER_TAG, "Entered send callback function");
     if (mac_addr == NULL) {
         ESP_LOGE(TAG, "Send cb arg error");
         return;
@@ -201,17 +204,17 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     espnow_send_param_t *data_dump = NULL;
     if(status == ESP_NOW_SEND_SUCCESS)
     {
-        ESP_LOGI(USER_TAG, "Removing successfully sent data from queue");
+        ESP_LOGD(USER_TAG, "Removing successfully sent data from queue");
         xQueueReceive(queue_espnow_stage, &data_dump, portMAX_DELAY);
-        ESP_LOGI(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
-        ESP_LOGI(USER_TAG, "freeing send_param from memory at location %p", data_dump);
+        ESP_LOGD(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
+        ESP_LOGD(USER_TAG, "freeing send_param from memory at location %p", data_dump);
         //TEST_espnow_data_print(data_dump->buffer);
         free((espnow_data_t *)(data_dump->buffer));
         free((espnow_send_param_t *)data_dump);
     }
     //ESP_LOGI(USER_TAG, "Giving back semaphore");
     xSemaphoreGive(semaphore_send);
-    ESP_LOGI(USER_TAG, "Exiting send callback function");
+    ESP_LOGD(USER_TAG, "Exiting send callback function");
 
     return;
 }
@@ -258,41 +261,28 @@ void espnow_data_prep_task(void *pv_parameters)
 {
     for(;;)
     {
-        
         //A new send parameters is allocated and will be freed in send callback function
-        
         espnow_send_param_t* send_parameters = malloc(sizeof(espnow_send_param_t));
         if (send_parameters == NULL) {
             ESP_LOGE(TAG, "Malloc send parameter fail");
         }
         ESP_LOGD(USER_TAG, "data_prep_task: creating new instance of send parameters at address %p", send_parameters);
-        //memset(send_parameters, 0, sizeof(espnow_send_param_t));
-        //send_parameters->unicast = false;
+        
         send_parameters->broadcast = true;
-        //send_parameters->state = 0;
-       // send_parameters->count = CONFIG_ESPNOW_SEND_COUNT;
-        //send_parameters->delay = CONFIG_ESPNOW_SEND_DELAY;
         send_parameters->len = sizeof(espnow_data_t);
         send_parameters->buffer = malloc(sizeof(espnow_data_t));
         if (send_parameters == NULL) {
             ESP_LOGE(USER_TAG, "Malloc buffer fail");
         }
-        //ESP_LOGI(USER_TAG, "data_prep_task: creating new instance of espnow_data at address %p", send_parameters->buffer);
-        //memset(send_parameters->buffer, 0, sizeof(espnow_data_t));
+
         memcpy(send_parameters->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-        
-        
-        //espnow_data *buf = (espnow_data *) send_parameters->buffer;
         image_data_raw_t *image_data = NULL;
-        //ESP_LOGI(USER_TAG, "data_prep_task: Taking image semaphore");
-        //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
+
         ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue");
         if (pdFAIL == xQueueReceive(queue_image, &image_data, portMAX_DELAY))
         {
             ESP_LOGE(USER_TAG, "Failed to indefinitely block on queue recieve");
         }
-        //ESP_LOGI(USER_TAG, "data_prep_task: giving image semaphore");
-        //xSemaphoreGive(semaphore_image);
         espnow_data_t *buf = send_parameters->buffer;
 
         ESP_LOGD(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
@@ -315,11 +305,8 @@ void espnow_data_prep_task(void *pv_parameters)
         buf->crc = 0;
         buf->magic = device_role;
         buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
-
-        //send_parameters->buffer = buf;
         ESP_LOGD(USER_TAG, "Data_prep_task: Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
-        //TEST_espnow_data_print(buf);
-        //TEST_espnow_data_print(send_parameters->buffer);
+        
         //is there a way to notify if the queue is full?
         xQueueSend(queue_espnow_stage, &send_parameters, portMAX_DELAY/portTICK_PERIOD_MS);
         }
@@ -357,6 +344,7 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
 {
     for(;;)
     {   
+        xSemaphoreTake(TEST_semaphore_generator, portMAX_DELAY);
         image_data_raw_t *image = malloc(sizeof(image_data_raw_t));
         memset(&(image->data), 0x0A, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
         image->len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH;
@@ -364,10 +352,14 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
         //ESP_LOGI(USER_TAG, "data staging task: taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
         ESP_LOGI(USER_TAG, "data generating task: putting image into queue");
-        xQueueSend(queue_image, &image, portMAX_DELAY/portTICK_PERIOD_MS);
+        if(xQueueSend(queue_image, &image, 0) == pdFALSE)
+        {
+            ESP_LOGE(USER_TAG, "Failed to add new data to image queue, items in queue_image %d", uxQueueMessagesWaiting(queue_image));
+            ESP_LOGE(USER_TAG, "Items in queue_espnow_stage %d", uxQueueMessagesWaiting(queue_espnow_stage));
+        }
         //ESP_LOGI(USER_TAG, "data staging task: giving image semaphore");
         //xSemaphoreGive(semaphore_image);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        
     }
 }
 
@@ -565,7 +557,86 @@ void TEST_core_data_transfer_init()
     }
      
 }
-void TEST_espnow_transfer()
+
+void TEST_MOCK_create_data()
+{
+    
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    //ESP_LOGI(TAG_AFE, "Giving back generator semaphore");
+    if (pdTRUE != xSemaphoreGiveFromISR(TEST_semaphore_generator, &xHigherPriorityTaskWoken))
+    {
+        //ESP_LOGE(TAG_AFE, "Failed to give back semaphore");
+        return;
+    }
+    //spi_device_transmit(spi_master[0], &transaction_mock);
+    // a yield is needed is a higher priority task is awoken
+    // which it is, because the semaphoreGive always triggers a high priority task to generate data
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    
+
+    return;
+}
+
+
+// This function is register as the user ISR function when the GPTimer invokes an interrupt
+// This MUSTN'T call any blocking operations, including logging outputs
+void TEST_generator_alarm()
+{
+    // this code is commented out during testing without AFE hardware
+    //AFE_sync_chain();
+    //AFE_sync_chain();
+    //ESP_LOGI(TAG_AFE, "Hello from timer alarm");
+    //TEST_GPTimer_hello();
+    TEST_MOCK_create_data();
+    //TEST_data++;
+}
+
+esp_err_t TEST_create_espnow_generator_timer(uint32_t data_rate)
+{
+    ESP_LOGI(USER_TAG, "Starting GPtimer init");
+    gptimer_config_t gptimer_config;/* ={
+        .clk_src= GPTIMER_CLK_SRC_APB,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 10000,
+        .intr_priority = 0 // this sets the interrupt priority to the lowest priorities
+    }; */
+    gptimer_config.clk_src = GPTIMER_CLK_SRC_APB;// giving the timer the max possible clock of 80MHz
+    gptimer_config.direction = GPTIMER_COUNT_UP;
+    gptimer_config.resolution_hz = 1000*10;
+    gptimer_config.intr_priority = 0;
+    gptimer_alarm_config_t gptimer_alarm; /* = {
+        .alarm_count = 10000/2000,
+        .flags.auto_reload_on_alarm = true,
+        .reload_count = 0,
+    }; */
+    gptimer_alarm.alarm_count = 10000/data_rate; // sets the value when the alarm triggers, a second will have 10000 ticks, and the needed mock ODR is 2kSPs (2000)
+    gptimer_alarm.flags.auto_reload_on_alarm = true; // when alarm is triggered, count is reloaded
+    gptimer_alarm.reload_count = 0; // count autoreloads to 0
+
+    ESP_ERROR_CHECK(gptimer_new_timer(&gptimer_config, &TEST_gptimer));
+    gptimer_event_callbacks_t callback; /* = {
+        .on_alarm = Timer_sync_alarm
+    }; */
+    callback.on_alarm = (void*)TEST_generator_alarm;
+
+    ESP_LOGI(USER_TAG, "starting timer");
+    // Generating semaphore which will be used for the task to generate mock data
+    TEST_semaphore_generator = xSemaphoreCreateBinary();
+
+    ESP_ERROR_CHECK(gptimer_register_event_callbacks(TEST_gptimer, &callback, NULL));
+    ESP_ERROR_CHECK(gptimer_enable(TEST_gptimer));
+    ESP_ERROR_CHECK(gptimer_set_alarm_action(TEST_gptimer, &gptimer_alarm));
+    ESP_ERROR_CHECK(gptimer_start(TEST_gptimer));
+
+
+    // generating task which will send new data via SPI
+   xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, NULL, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1);
+    ESP_LOGI(USER_TAG, "GPTimer and task configured");
+
+    return ESP_OK;
+}
+
+void TEST_espnow_transfer(uint32_t data_rate)
 {
     example_wifi_init();
     user_espnow_init();
@@ -584,14 +655,15 @@ void TEST_espnow_transfer()
 
         if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
         if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
-        if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 0) == pdPASS) task_count++;
-        if(task_count == 3)
+        
+        if(task_count == 2)
         {
             ESP_LOGI(USER_TAG, "All tasks were created successfully!");
         }else
         {
             ESP_LOGE(USER_TAG, "There was an error during task creation!");
         }
+        TEST_create_espnow_generator_timer(data_rate);
 
     }else if(device_role == DEVICE_ROLE_RECIEVER)
     {
@@ -629,7 +701,7 @@ void app_main(void)
     //TEST_CLKSRC();
     //TEST_SPI();
     //Start_App();
-    TEST_espnow_transfer();
+    TEST_espnow_transfer(100);
     //TEST_GPtimer();
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
