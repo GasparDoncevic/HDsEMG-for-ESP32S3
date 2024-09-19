@@ -132,7 +132,7 @@ uint16_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transactio
     transaction_get_response->tx_buffer = NULL;
     transaction_get_response->rxlength = 16;
     spi_device_transmit(spi_device, transaction_get_response);
-    ESP_LOGI(TAG_AFE, "Got response %x", response);
+    ESP_LOGD(TAG_AFE, "Got response %x", response);
     return response;
 }
 
@@ -163,7 +163,7 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
     esp_err_t result;
     uint8_t cmd_attempts_ADC = 0;
 
-    ESP_LOGI(TAG_AFE, "Sending data 0x%x", (int)(command[0]<<8 | command[1]));
+    ESP_LOGD(TAG_AFE, "Sending data 0x%x", (int)(command[0]<<8 | command[1]));
 
     // Implemeted a retry-pattern which is optional defined by passed function parameter
     do 
@@ -310,9 +310,9 @@ void TEST_Task_generate_data_w_SPI()
 {
     for(;;)
     {
-        ESP_LOGI(TAG_AFE, "Taking semaphore to generate new data and send to SPI");
+        ESP_LOGV(TAG_AFE, "Taking semaphore to generate new data and send to SPI");
         xSemaphoreTake(semaphore_generator, portMAX_DELAY);
-        ESP_LOGI(TAG_AFE, "Generator semaphore Taken");
+        ESP_LOGV(TAG_AFE, "Generator semaphore Taken");
        // ESP_LOGI(TAG_AFE, "Sending transaciton located on %p which has data on %p", &transaction_mock, &data_mock);
        /*  for (uint8_t i = 0; i < sizeof(AFE_data_t); i++)
         {
@@ -326,7 +326,7 @@ void TEST_Task_generate_data_w_SPI()
         {
             ESP_LOGI(TAG_AFE, "sending new data via SPI");
         }
-        vTaskDelay(1);
+        vTaskDelay(1000);
         
     }
 }
@@ -644,7 +644,7 @@ void Task_AFE_get_data()
     vTaskDelay(1000/portTICK_PERIOD_MS);
     // This portion of the code handles the creation of the slave transactions
     // This is done in advance in order to save time 
-    ESP_LOGI(TAG_AFE, "Creating transactions of length %d bits", AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8);
+    ESP_LOGD(TAG_AFE, "Creating transactions of length %d bits", AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8);
     for(uint16_t i = 0; i < 300; i++)
     {
         transactions[i].tx_buffer = NULL;
@@ -696,7 +696,7 @@ void Task_AFE_get_data()
                 }
             }
             // the malloc call needs to happen somewhere here because it would be nice if i could malloc after i decide if I even want to keep the data
-            ESP_LOGI(TAG_AFE, "Sending data to queue");
+            //ESP_LOGI(TAG_AFE, "Sending data to queue");
             AFE_data_t *data = malloc(sizeof(AFE_data_t));
             memcpy(data, recieved_data, sizeof(AFE_data_t));
             //transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
@@ -739,7 +739,7 @@ void Task_AFE_stage_data()
         }
         free(unparsed_data);
         image_data_raw_t *image_stage = malloc(sizeof(image_data_raw_t));
-        ESP_LOGI(TAG_AFE, "Staged new data on memory locaiton %p", image_stage);
+        ESP_LOGD(TAG_AFE, "Staged new data on memory locaiton %p", image_stage);
         memcpy(image_stage, &image_filtered, sizeof(image_data_raw_t));
 
         xQueueSend(queue_image, &image_stage, portMAX_DELAY);
@@ -848,7 +848,7 @@ void Task_TEST_loopback_receiver()
         ESP_LOGI(TAG_AFE, "Recieved new packet");
         for (uint8_t i = 0; i < sizeof(AFE_data_t)/2; i++)
         {
-            ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer) +1) ); 
+            ESP_LOGD(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer) +1) ); 
         }
         
         vTaskDelay(100);
