@@ -76,10 +76,16 @@ static const char *TAG = "espnow_example";
 static QueueHandle_t s_example_espnow_queue;
 
 static uint8_t s_example_broadcast_mac[ESP_NOW_ETH_ALEN] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-static uint16_t s_example_espnow_seq[EXAMPLE_ESPNOW_DATA_MAX] = { 0, 0 };
+//static uint16_t s_example_espnow_seq[EXAMPLE_ESPNOW_DATA_MAX] = { 0, 0 };
 
+// ESPNOW Buffer parameters
+static uint16_t buffer_size = 200;
+static uint16_t buffer_head_number = 0;
+static uint16_t buffer_tail_number = 0;
+static bool buffer_tail_reached_head = true;
+// ESPNOW Buffer parameters
 
-static void example_espnow_deinit(example_espnow_send_param_t *send_param);
+//static void example_espnow_deinit(example_espnow_send_param_t *send_param);
 
 //function prototypes
 void TEST_espnow_data_print(espnow_data_t* data);
@@ -101,13 +107,13 @@ static void example_wifi_init(void)
 #endif
 }
 
-static void example_espnow_deinit(example_espnow_send_param_t *send_param)
+/* static void example_espnow_deinit(example_espnow_send_param_t *send_param)
 {
     free(send_param->buffer);
     free(send_param);
     vSemaphoreDelete(s_example_espnow_queue);
     esp_now_deinit();
-}
+} */
 
 //BEGINING OF USER CODE
 static esp_err_t user_espnow_init(void)
@@ -216,13 +222,16 @@ static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status
     {
         ESP_LOGD(USER_TAG, "Removing successfully sent data from queue");
         xQueueReceive(queue_espnow_stage, &data_dump, portMAX_DELAY);
-        ESP_LOGD(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
+/*         ESP_LOGD(USER_TAG, "freeing sent data from memory at location %p", data_dump->buffer);
         ESP_LOGD(USER_TAG, "freeing send_param from memory at location %p", data_dump);
         //TEST_espnow_data_print(data_dump->buffer);
         free((espnow_data_t *)(data_dump->buffer));
-        free((espnow_send_param_t *)data_dump);
+        free((espnow_send_param_t *)data_dump); */
     }
-    //ESP_LOGI(USER_TAG, "Giving back semaphore");
+    ESP_LOGD(USER_TAG, "Giving back semaphore");
+    buffer_tail_number++;
+    buffer_tail_number %= buffer_size;
+    if(buffer_tail_number == buffer_head_number) buffer_tail_reached_head = true;
     xSemaphoreGive(semaphore_send);
     ESP_LOGD(USER_TAG, "Exiting send callback function");
 
@@ -269,32 +278,62 @@ static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_
 // Allocates memory for espnow_data which will be freed in the send callback function
 void espnow_data_prep_task(void *pv_parameters)
 {
-    // TODO: This portion of the code needs to preallocate all of the data structures that will be used in order to minimize malloc() calls
+    
+    ESP_LOGI(USER_TAG, "Allocating memory for data transfer via ESPNOW\n Size of transmit buffer: %d", buffer_size);
+    // This portion of the code preallocates all of the data structures that will be used in order to minimize malloc() calls
+    // It creates a circular buffer for espnow send parameters and espnow data
+    // The head element receives new data, while the tail is the oldest data waiting to be sent 
+
+    espnow_send_param_t* espnow_send_param_buff[buffer_size];
+    espnow_data_t* espnow_data_buff[buffer_size];
+
+   /*  espnow_send_param_t* transfer_data = malloc(sizeof(espnow_send_param_t));
+    transfer_data->broadcast = true;
+    transfer_data->buffer = malloc(sizeof(espnow_data_t));
+    transfer_data->len = sizeof(espnow_data_t);
+    memcpy(transfer_data->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN); */
+    
+
+    // Allocating all send parameters and espnow data, and binding them
+    for(uint16_t element = 0; element < buffer_size; element++)
+    {
+        espnow_send_param_buff[element] = malloc(sizeof(espnow_send_param_t));
+        espnow_data_buff[element] = malloc(sizeof(espnow_data_t));
+        espnow_send_param_buff[element]->buffer = espnow_data_buff[element];
+
+        espnow_send_param_buff[element]->broadcast = true;
+        espnow_send_param_buff[element]->len = sizeof(espnow_data_t);
+        memcpy(espnow_send_param_buff[element]->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
+    }
+
+    for (uint16_t element = 0; element < buffer_size; element++)
+    {
+        if(espnow_data_buff[element] == NULL)
+            ESP_LOGE(USER_TAG, "espnow data element in espnow data buffer in position %d is not allocated", element);
+        if (espnow_send_param_buff[element] == NULL)
+            ESP_LOGE(USER_TAG, "espnow send param element in espnow send param buffer in position %d is not allocated", element);
+    }
+
     // TODO: needs to implement a circular buffer of espnow_data_t
     image_data_raw_t images[ESPNOW_NUM_PACKETS];
 
     // TODO: This portion of the code needs to preallocate all of the data structures that will be used in order to minimize malloc() calls
     for(;;)
     {
-        //A new send parameters is allocated and will be freed in send callback function
-        espnow_send_param_t* send_parameters = malloc(sizeof(espnow_send_param_t));
-        if (send_parameters == NULL) {
-            ESP_LOGE(TAG, "Malloc send parameter fail");
-        }
-        ESP_LOGD(USER_TAG, "data_prep_task: creating new instance of send parameters at address %p", send_parameters);
-        
-        send_parameters->broadcast = true;
-        send_parameters->len = sizeof(espnow_data_t);
-        send_parameters->buffer = malloc(sizeof(espnow_data_t));
-        if (send_parameters == NULL) {
-            ESP_LOGE(USER_TAG, "Malloc buffer fail");
+        uint8_t error_delay_len_ms = 5; 
+        if ((!buffer_tail_reached_head) && (buffer_head_number == buffer_tail_number))
+        {
+            ESP_LOGE(USER_TAG, "The buffer head has reached the buffer tail and could start overwritting data\n Pausing data prep for %d ms", error_delay_len_ms);
+            vTaskDelay(error_delay_len_ms/portTICK_PERIOD_MS);
+            buffer_tail_reached_head = false;
+
         }
 
-        memcpy(send_parameters->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
         image_data_raw_t *image_data = NULL;
-        espnow_data_t *buf = (espnow_data_t *) send_parameters->buffer;
+        espnow_data_t *buf = (espnow_data_t *) espnow_send_param_buff[buffer_head_number]->buffer;
+        //espnow_data_t *buf = (espnow_data_t *) transfer_data->buffer;
         // fetching image data from AFE subsystem via queue one image at a time
-        ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue");
+        ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue"); 
         for (uint8_t image = 0; image < ESPNOW_NUM_PACKETS; image++)
         {
             if (pdFAIL == xQueueReceive(queue_image, &image_data, portMAX_DELAY))
@@ -319,24 +358,30 @@ void espnow_data_prep_task(void *pv_parameters)
         //ESP_LOGD(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
         //ESP_LOGD(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
         //ESP_LOGD(USER_TAG, "The fetched image data is located on %p", &(image_data->data));
-
+        ESP_LOGD(USER_TAG, "data_prep_task: new espnow_data packet on location %p", buf);
+        ESP_LOGD(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", &images, (void *) &(buf->payload));
         ESP_LOGD(USER_TAG, "Size of ESPNOW_PACKAGE_SIZE: %d", ESPNOW_DATA_PACKET_SIZE);
         memcpy(&(buf->payload), &images, ESPNOW_PACKAGE_SIZE);
         buf->len_payload = ESPNOW_PACKAGE_SIZE;
 
-        ESP_LOGD(USER_TAG, "size of send_parameters->len: %d", send_parameters->len);
+        
+        ESP_LOGD(USER_TAG, "size of send_parameters->len: %d", espnow_send_param_buff[buffer_head_number]->len);
         ESP_LOGD(USER_TAG, "size of espnow_data: %d", sizeof(espnow_data_t));
-        assert(send_parameters->len >= sizeof(*buf));
+        assert(espnow_send_param_buff[buffer_head_number]->len >= sizeof(*buf));
         
 
-        buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
+        buf->type = IS_BROADCAST_ADDR(espnow_send_param_buff[buffer_head_number]->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
         buf->crc = 0;
         buf->magic = device_role;
         //buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len); DIsabling crc to save cpu cycles
-        ESP_LOGD(USER_TAG, "Data_prep_task: Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
+        ESP_LOGD(USER_TAG, "Data_prep_task: Address of buf: %p;\n address of send_parameter->buffer: %p\n Address of espnow_data: %p\n Address of send_parameters[head]: %p",
+                 buf, espnow_send_param_buff[buffer_head_number]->buffer, espnow_data_buff[buffer_head_number], espnow_send_param_buff[buffer_head_number]);
+        //TEST_espnow_data_print(espnow_send_param_buff[buffer_head_number]->buffer);
         
         //is there a way to notify if the queue is full?
-        xQueueSend(queue_espnow_stage, &send_parameters, portMAX_DELAY/portTICK_PERIOD_MS);
+        xQueueSend(queue_espnow_stage, &espnow_send_param_buff[buffer_head_number], portMAX_DELAY/portTICK_PERIOD_MS);
+        buffer_head_number++;
+        buffer_head_number %= buffer_size;
         }
     
 }
@@ -546,7 +591,7 @@ void TEST_espnow_data_print(espnow_data_t* data)
     // max size of the structure for now is 42 and the last 32 bytes are payload data packed in uint16_t type
     for(int i = 0; i < (data->len_payload)/ESPNOW_DATA_PACKET_SIZE; i++)
     {
-        ESP_LOGD(USER_TAG, "the %dth payload data is 0x%x", i ,(uint16_t)(data->payload[i].data));
+        ESP_LOGD(USER_TAG, "the %dth payload data is 0x%hx", i ,(uint16_t)(data->payload[i].data[0]));
     }   
 
     return;
@@ -690,7 +735,7 @@ void TEST_espnow_transfer(uint32_t data_rate)
         }
 
         if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
-        if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
+        if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 5000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
         
         if(task_count == 2)
         {
@@ -730,6 +775,7 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK( ret );
+    esp_log_level_set("*", ESP_LOG_WARN);
 
     // Creating task for testing espnow
     

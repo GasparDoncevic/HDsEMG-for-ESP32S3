@@ -2,7 +2,7 @@
 #ifndef AFE_CONTROLL_H
 #define AFE_CONTROLL_H
 //USER DEFINES
-#define AFE_NUM_OF_ADC 1
+#define AFE_NUM_OF_ADC 4
 #define AFE_NUM_OF_ADC_CH 8
 #define AFE_SIZE_DATA_PACKET 3
 #define AFE_COMMAND_LEN 16
