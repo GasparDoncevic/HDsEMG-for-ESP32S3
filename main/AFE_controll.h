@@ -13,7 +13,7 @@ typedef struct
 {
     uint8_t len;
     uint16_t data[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH];
-} image_data_raw_t;
+} PACKED_ATTR image_data_raw_t;
 
 
 typedef enum

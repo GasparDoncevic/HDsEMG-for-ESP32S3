@@ -143,6 +143,6 @@
 
 #define ADC_ERROR_CODE 0x0E00
 
-#define TEST_GEN_ODR 100
+#define TEST_GEN_ODR 1
 
 #endif

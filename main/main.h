@@ -24,6 +24,12 @@
 
 #define IS_BROADCAST_ADDR(addr) (memcmp(addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN) == 0)
 
+#define IMAGE_PIXEL_SIZE 2
+#define ESPNOW_DATA_PACKET_SIZE ((AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*IMAGE_PIXEL_SIZE) + 1)
+#define ESPNOW_MAX_DATA_PACKAGE_SIZE 240
+#define ESPNOW_NUM_PACKETS (ESPNOW_MAX_DATA_PACKAGE_SIZE/ ESPNOW_DATA_PACKET_SIZE)
+#define ESPNOW_PACKAGE_SIZE  (ESPNOW_NUM_PACKETS * ESPNOW_DATA_PACKET_SIZE)
+
 // CUSTOM USER DEFINES 
 #ifndef AFE_CONTROLL_H
 #include "AFE_controll.h"
@@ -72,8 +78,6 @@ enum {
 /* User defined field of ESPNOW data in this example. */
 typedef struct {
     uint8_t type;                         //Broadcast or unicast ESPNOW data.
-    uint8_t state;                        //Indicate that if has received broadcast ESPNOW data or not.
-    uint16_t seq_num;                     //Sequence number of ESPNOW data.
     uint16_t crc;                         //CRC16 value of ESPNOW data.
     uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
     uint8_t payload[0];                   //Real payload of ESPNOW data.
@@ -95,11 +99,9 @@ typedef struct {
 typedef struct
 {
     uint8_t type;                         //Broadcast or unicast ESPNOW data.
-    uint8_t state;                        //Indicate that if has received broadcast ESPNOW data or not.
-    uint16_t seq_num;                     //Sequence number of ESPNOW data.
     uint16_t crc;                         //CRC16 value of ESPNOW data.
     uint32_t magic;                       //Magic number which is used to determine which device to send unicast ESPNOW data.
-    uint16_t payload[AFE_NUM_OF_ADC * AFE_NUM_OF_ADC_CH]; // data payload to be sent via espnow
+    image_data_raw_t payload[ESPNOW_NUM_PACKETS]; // data payload to be sent via espnow
     uint8_t len_payload;
     
 } PACKED_ATTR espnow_data_t;

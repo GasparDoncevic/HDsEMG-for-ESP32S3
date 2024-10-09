@@ -167,13 +167,23 @@ static esp_err_t user_espnow_init(void)
     peer->ifidx = ESPNOW_WIFI_IF;
     peer->encrypt = false;
     memcpy(peer->peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
-    esp_now_rate_config_t *config = malloc(sizeof(esp_now_rate_config_t));
-    config->phymode = WIFI_PHY_MODE_HT40; // HT stand for high throughput with a bandiwth of 40MHz
-    config->rate = WIFI_PHY_RATE_MAX;
-    config->dcm = false;
-    config->ersu = false;
-    esp_now_set_peer_rate_config(peer->peer_addr, config);
+
+    uint8_t mac_peer[ESP_NOW_ETH_ALEN] = {0};
+    esp_now_rate_config_t config = {
+    .phymode = WIFI_PHY_MODE_HT40, // HT stand for high throughput with a bandiwth of 40MHz
+    .rate = WIFI_PHY_RATE_MAX,
+    .dcm = false,
+    .ersu = false,
+    };
+
+
     ESP_ERROR_CHECK( esp_now_add_peer(peer) );
+    ESP_LOGI(USER_TAG, "Configuring peer");
+    ESP_LOGI(TAG, "Set rate config: phymode %d, rate %d, ersu %d, dcm %d", config.phymode, config.rate, config.ersu, config.dcm);
+    //ESP_ERROR_CHECK(esp_wifi_get_mac(ESP_IF_WIFI_STA, mac_peer));
+    //ESP_ERROR_CHECK(esp_now_set_peer_rate_config(mac_peer, &config));
+    ESP_ERROR_CHECK(esp_wifi_config_espnow_rate(ESPNOW_WIFI_IF, WIFI_PHY_MODE_11G));
+
     free(peer);
     //free(config);
 
@@ -181,7 +191,7 @@ static esp_err_t user_espnow_init(void)
     // Setting queues
     ESP_LOGI(USER_TAG, "Size of espnow data: %d", sizeof(espnow_data_t));
     queue_espnow_stage = xQueueCreate(200, sizeof(uint32_t));
-    queue_image = xQueueCreate(200, sizeof(uint32_t)); // this hardcoded value needs to be changed for a datatype of image_data
+    queue_image = xQueueCreate(200, sizeof(uint32_t)); 
     
     // Setting queues
 
@@ -259,6 +269,11 @@ static void espnow_receive_cb(const esp_now_recv_info_t *recv_info, const uint8_
 // Allocates memory for espnow_data which will be freed in the send callback function
 void espnow_data_prep_task(void *pv_parameters)
 {
+    // TODO: This portion of the code needs to preallocate all of the data structures that will be used in order to minimize malloc() calls
+    // TODO: needs to implement a circular buffer of espnow_data_t
+    image_data_raw_t images[ESPNOW_NUM_PACKETS];
+
+    // TODO: This portion of the code needs to preallocate all of the data structures that will be used in order to minimize malloc() calls
     for(;;)
     {
         //A new send parameters is allocated and will be freed in send callback function
@@ -277,22 +292,37 @@ void espnow_data_prep_task(void *pv_parameters)
 
         memcpy(send_parameters->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
         image_data_raw_t *image_data = NULL;
-
+        espnow_data_t *buf = (espnow_data_t *) send_parameters->buffer;
+        // fetching image data from AFE subsystem via queue one image at a time
         ESP_LOGI(USER_TAG, "data_prep_task: Taking from image queue");
-        if (pdFAIL == xQueueReceive(queue_image, &image_data, portMAX_DELAY))
+        for (uint8_t image = 0; image < ESPNOW_NUM_PACKETS; image++)
+        {
+            if (pdFAIL == xQueueReceive(queue_image, &image_data, portMAX_DELAY))
         {
             ESP_LOGE(USER_TAG, "Failed to indefinitely block on queue recieve");
         }
-        espnow_data_t *buf = send_parameters->buffer;
+            // Copy data from recieved image to data packet
+            // This could be copies directly to send_parameters->buf->payload, but it will require pointer magic
+            images[image].len = image_data->len;
+            for (uint8_t datum = 0; datum < images[image].len; datum++)
+            {
+                images[image].data[datum] = image_data->data[datum];
+            }
+            
+            ESP_LOGD(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
+            free(image_data);
 
-        ESP_LOGD(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
-        ESP_LOGD(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
-        ESP_LOGD(USER_TAG, "The fetched image data is located on %p", &(image_data->data));
+        }
+         // fetching image data from AFE subsystem via queue one image at a time
 
-        memcpy(&(buf->payload), &(image_data->data), AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
-        buf->len_payload = image_data->len;
-        ESP_LOGD(USER_TAG, "data_prep_task: freeing allocated image data on location %p", image_data);
-        free(image_data);
+        // THESE LOGGING CALLS NEED TO BE ADAPTED TO DATA PACKING
+        //ESP_LOGD(USER_TAG, "data_prep_task: Creating a new espnow_data packet on location %p", buf);
+        //ESP_LOGD(USER_TAG, "data_prep_task: Copying data from location %p to new location %p", image_data, (void *) &(buf->payload));
+        //ESP_LOGD(USER_TAG, "The fetched image data is located on %p", &(image_data->data));
+
+        ESP_LOGD(USER_TAG, "Size of ESPNOW_PACKAGE_SIZE: %d", ESPNOW_DATA_PACKET_SIZE);
+        memcpy(&(buf->payload), &images, ESPNOW_PACKAGE_SIZE);
+        buf->len_payload = ESPNOW_PACKAGE_SIZE;
 
         ESP_LOGD(USER_TAG, "size of send_parameters->len: %d", send_parameters->len);
         ESP_LOGD(USER_TAG, "size of espnow_data: %d", sizeof(espnow_data_t));
@@ -300,11 +330,9 @@ void espnow_data_prep_task(void *pv_parameters)
         
 
         buf->type = IS_BROADCAST_ADDR(send_parameters->dest_mac) ? EXAMPLE_ESPNOW_DATA_BROADCAST : EXAMPLE_ESPNOW_DATA_UNICAST;
-        buf->state = 0;
-        buf->seq_num = s_example_espnow_seq[buf->type]++;
         buf->crc = 0;
         buf->magic = device_role;
-        buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len);
+        //buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_parameters->len); DIsabling crc to save cpu cycles
         ESP_LOGD(USER_TAG, "Data_prep_task: Address of buf: %p; address of send_parameter->buffer: %p", buf, send_parameters->buffer);
         
         //is there a way to notify if the queue is full?
@@ -326,15 +354,17 @@ void espnow_send_data_task(void *pv_parameters)
 
         ESP_LOGI(USER_TAG ,"send_data_task: Taking data from queue");
         xQueuePeek(queue_espnow_stage, &send_parameters, portMAX_DELAY);
-        TEST_espnow_data_print(send_parameters->buffer);
         ESP_LOGD(USER_TAG, "send_data_task: address of received send_parameters %p", send_parameters);
         ESP_LOGD(USER_TAG, "send_data_task: Send espnow_data from location %p", (send_parameters->buffer));
-        TEST_espnow_data_print(send_parameters->buffer);
+        //TEST_espnow_data_print(send_parameters->buffer);
         if (esp_now_send(send_parameters->dest_mac, (uint8_t *)(send_parameters->buffer), send_parameters->len) != ESP_OK)
         {
             ESP_LOGE(USER_TAG, "send_data_task: Failed to send data to destination address");
+            ESP_LOGE(USER_TAG, "Size of send attempt: %d, \n Size of espnow_data: %d\n", send_parameters->len, ESPNOW_PACKAGE_SIZE);
+            ESP_LOGE(USER_TAG, "Number of items in image queue: %d, \n Number of items in send queue: %d, \n", uxQueueMessagesWaiting(queue_image), uxQueueMessagesWaiting(queue_espnow_stage));
+            
             xSemaphoreGive(semaphore_send);
-            vTaskDelay(10000/portTICK_PERIOD_MS);
+            vTaskDelay(10/portTICK_PERIOD_MS);
         }
     }
 }
@@ -348,10 +378,10 @@ void TEST_espnow_stage_data_task(void *pv_parameters)
         image_data_raw_t *image = malloc(sizeof(image_data_raw_t));
         memset(&(image->data), 0x0A, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
         image->len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH;
-        ESP_LOGI(USER_TAG, "data generating task: generating new image data at location %p", (void *) image);
+        ESP_LOGD(USER_TAG, "data generating task: generating new image data at location %p", (void *) image);
         //ESP_LOGI(USER_TAG, "data staging task: taking image semaphore");
         //xSemaphoreTake(semaphore_image, portMAX_DELAY/portTICK_PERIOD_MS);
-        ESP_LOGI(USER_TAG, "data generating task: putting image into queue");
+        ESP_LOGD(USER_TAG, "data generating task: putting image into queue");
         if(xQueueSend(queue_image, &image, 0) == pdFALSE)
         {
             ESP_LOGE(USER_TAG, "Failed to add new data to image queue, items in queue_image %d", uxQueueMessagesWaiting(queue_image));
@@ -435,9 +465,14 @@ void espnow_parse_data_task()
         xQueueReceive(queue_image, &image_data, portMAX_DELAY);
         //ESP_LOGI(USER_TAG, "received image size of %d", image_data->len);
         //TODO: Send Data via serial connection to PC, would be wise to implement message queue and shift job to task on other core
-        for(int i = 0; i < image_data->len_payload; i++)
+        for(int i = 0; i < (image_data->len_payload)/ESPNOW_DATA_PACKET_SIZE; i++)
         {
-            ESP_LOGI(USER_TAG, "The %dnth received data is 0x%x \n", i, (uint16_t)(image_data->payload[i]));
+
+            ESP_LOGD(USER_TAG, "The %dnth received image is: \n", i);
+            for(uint8_t j = 0; j < image_data->payload[i].len; j++)
+            {
+                ESP_LOGD(USER_TAG, "The %dnth received pixel is 0x%X \n", j, (image_data->payload[i]).data[j]);
+            }
         }
         free(image_data);
        
@@ -509,9 +544,9 @@ void TEST_espnow_data_print(espnow_data_t* data)
 
     ESP_LOGD(USER_TAG, "Payload size is %d", data->len_payload);
     // max size of the structure for now is 42 and the last 32 bytes are payload data packed in uint16_t type
-    for(int i = 0; i < data->len_payload; i++)
+    for(int i = 0; i < (data->len_payload)/ESPNOW_DATA_PACKET_SIZE; i++)
     {
-        ESP_LOGD(USER_TAG, "the %dth payload data is 0x%x", i ,(uint16_t)(data->payload[i]));
+        ESP_LOGD(USER_TAG, "the %dth payload data is 0x%x", i ,(uint16_t)(data->payload[i].data));
     }   
 
     return;
@@ -639,6 +674,7 @@ esp_err_t TEST_create_espnow_generator_timer(uint32_t data_rate)
 void TEST_espnow_transfer(uint32_t data_rate)
 {
     example_wifi_init();
+    vTaskDelay(100/portTICK_PERIOD_MS);
     user_espnow_init();
     uint8_t task_count = 0;
     if(device_role == DEVICE_ROLE_SENDER)
@@ -663,6 +699,7 @@ void TEST_espnow_transfer(uint32_t data_rate)
         {
             ESP_LOGE(USER_TAG, "There was an error during task creation!");
         }
+        vTaskDelay(1000/portTICK_PERIOD_MS);
         TEST_create_espnow_generator_timer(data_rate);
 
     }else if(device_role == DEVICE_ROLE_RECIEVER)
@@ -701,7 +738,7 @@ void app_main(void)
     //TEST_CLKSRC();
     //TEST_SPI();
     //Start_App();
-    TEST_espnow_transfer(100);
+    TEST_espnow_transfer(2000);
     //TEST_GPtimer();
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
