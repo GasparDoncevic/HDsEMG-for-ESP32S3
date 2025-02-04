@@ -100,16 +100,17 @@ static gptimer_handle_t gptimer = NULL;
 // This function is intended to be called after every config command sent to ADC to read the response in case an error code appears
 // The AFE Sends a response in the next frame after a command is sent. This function is intened to get that response.
 // It uses the master spi device used for configuring the AFE and should be only after reset and in AFE_Send_Command function
-uint16_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction_t * transaction_get_response)
+uint16_t AFE_command_get_response(spi_device_handle_t spi_device)
 {
     //configuring response transaciton
     // this transaction is used for getting the response in the next frame after the command
+    spi_transaction_t transaction_get_response;
     uint16_t response = 0;
-    transaction_get_response->length = 16;
-    transaction_get_response->rx_buffer = &response; 
-    transaction_get_response->tx_buffer = NULL;
-    transaction_get_response->rxlength = 16;
-    spi_device_transmit(spi_device, transaction_get_response);
+    transaction_get_response.length = 16;
+    transaction_get_response.rx_buffer = &response; 
+    transaction_get_response.tx_buffer = NULL;
+    transaction_get_response.addr = 16;
+    spi_device_transmit(spi_device, &transaction_get_response);
     ESP_LOGD(TAG_AFE, "Got response %x", response);
     return response;
 }
@@ -133,7 +134,7 @@ uint16_t reverse_bytes(uint16_t word) {
 // This sends in a blocking way
 esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uint8_t address, uint8_t reg_value)
 {
-    spi_transaction_t transaction_command, transaction_response;
+    spi_transaction_t transaction_command;
     //configuring command transaction
     // this transaction is used for transmitting the command
     transaction_command.length = 16;
@@ -142,14 +143,9 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
     transaction_command.tx_buffer = &command;
     transaction_command.rxlength = 0;
     transaction_command.flags = 0;
-    //configuring response transaciton
-    // this transaction is used for getting the response in the next frame after the command
     // This should be done in command_get_response, but is kept here to avoid unreadable code in 
     // retry pattern
     uint16_t response = 0;
-    transaction_response.tx_buffer = NULL;
-    transaction_response.rxlength = 16;
-    transaction_response.flags = 0;
     esp_err_t result;
     uint8_t cmd_attempts_ADC = 0;
 
@@ -172,7 +168,7 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
         ESP_LOGV(TAG_AFE, "Command sent");
 
         //Checking to see if retrying failed commands is enabled
-        if (RETRY == will_retry) response = AFE_command_get_response(spi_device, &transaction_response);
+        if (RETRY == will_retry) response = AFE_command_get_response(spi_device);
     }while((uint16_t)ADC_ERROR_CODE == (uint16_t)(response) || (RETRY == will_retry && ((uint8_t)(command[1]) != (uint8_t)(response))));
 
     if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI command failed");
@@ -475,12 +471,12 @@ esp_err_t AFE_config()
     // each iteration of the loop configures one ADC in the daisy-chain
     for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
     {
-        spi_transaction_t initial_response;
+        uint16_t initial_response = 0;
         
         ESP_LOGI(TAG_AFE, "Starting config of device %d", device);
         //setting channel on standby (NONE)
         //First response after reset is alays error code
-        if ((uint16_t)ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
+        if ((uint16_t)ADC_ERROR_CODE != (initial_response = AFE_command_get_response(spi_master[device]))) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
 
         //Sending first command for channel stanby mode
         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, (uint8_t) MASK_ADC_CH_EN_ALL)))
@@ -595,7 +591,7 @@ void Task_AFE_init()
 
     for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
     {
-        ESP_LOGI(TAG_AFE, "Configuring master device %d", device);
+        ESP_LOGI(TAG_AFE, "Configuring master spi device %d", device);
         // The ADC operates in mode 0
         //Initializing master device for ADC daisy-chain config
         (device_spi_master[device]).clock_speed_hz = SPI_DATA_CLK;
@@ -610,7 +606,7 @@ void Task_AFE_init()
 
         ret = spi_bus_add_device(SPI2_HOST, &device_spi_master[device], &spi_master[device]);
         assert(ret == ESP_OK);
-        ESP_LOGI(TAG_AFE, "Master device %d configured", device);
+        ESP_LOGI(TAG_AFE, "Master spi device %d configured", device);
     }
     //spi_bus_add_device(SPI2_HOST, &device_spi_master, &spi_master);
     //assert( !(spi_master[0] == NULL));

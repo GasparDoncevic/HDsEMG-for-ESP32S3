@@ -60,17 +60,6 @@ spi_transaction_t transaction_mock = {
     };
 // TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
 
-
-extern int AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uint8_t address, uint8_t reg_value);
-extern uint16_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transaction_t * transaction_get_response);
-extern esp_err_t AFE_set_SPI_controll_mode(bool SPI_mode);
-extern esp_err_t AFE_config_clk_source();
-extern esp_err_t AFE_Init_Sync_timer();
-extern void AFE_sync_chain();
-extern void Timer_sync_alarm();
-extern esp_err_t AFE_Init_Sync_timer();
-extern esp_err_t AFE_reset(bool use_spi);
-
 extern QueueHandle_t queue_AFE_data;
 extern QueueHandle_t queue_image;
 extern SemaphoreHandle_t semaphore_sync;
@@ -264,7 +253,7 @@ void TEST_spi_loopback()
 
 void TEST_SPI()
 {
-    ESP_LOG_LEVEL_SET(TAG_AFE_TEST, ESP_LOG_DEBUG);
+    esp_log_level_set(TAG_AFE_TEST, ESP_LOG_DEBUG);
     // Filling up test resource
     memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
     // Filling up test resource
@@ -374,12 +363,6 @@ void TEST_HW_AFE_command_loop()
 void TEST_TASK_listen()
 {
     esp_err_t result;
-    spi_transaction_t transaction;
-    uint16_t data_resp = 0;
-    transaction.length = 16;
-    transaction.rx_buffer = &data_resp;
-    transaction.tx_buffer = NULL;
-    transaction.rxlength = 16;
     esp_log_level_set("*", ESP_LOG_DEBUG);
     result = AFE_set_SPI_controll_mode(true);
     if(result != ESP_OK)
@@ -398,23 +381,23 @@ void TEST_TASK_listen()
         
         /** Toggling GPIO pins on ADC1 */
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_READ | ADDRESS_ADC_CHIP_STATUS, 0x00);
-        AFE_command_get_response(spi_master[0], &transaction);
+        AFE_command_get_response(spi_master[0]);
         ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC1");
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x0f);
-        AFE_command_get_response(spi_master[0], &transaction);
+        AFE_command_get_response(spi_master[0]);
         vTaskDelay(50/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
-        AFE_command_get_response(spi_master[0], &transaction);
+        AFE_command_get_response(spi_master[0]);
         
         ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC2");
         vTaskDelay(50/portTICK_PERIOD_MS);
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x0f);
-        AFE_command_get_response(spi_master[1], &transaction);
+        AFE_command_get_response(spi_master[1]);
         vTaskDelay(50/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
-        AFE_command_get_response(spi_master[1], &transaction);
+        AFE_command_get_response(spi_master[1]);
 
         //AFE_command_get_response(spi_master[0], &transaction);
         //ESP_LOGD(TAG_AFE_TEST, "Got response %x", data_resp);
