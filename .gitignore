@@ -1,1 +1,6 @@
 build/
+.vscode/
+.devcontainer/
+*.log
+debug.log
+sdkconfig.old
