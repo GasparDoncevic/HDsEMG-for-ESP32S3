@@ -4,9 +4,9 @@
 #ifndef AFE_CONFIG_H
 #define AFE_DONFIG_H
 
-#ifndef driver/gpio.h
+//#ifndef driver/gpio.h
 #include "driver/gpio.h"
-#endif
+//#endif
 
 // SPI SLAVE PINS
 #define SPI_SLAVE_CS0   GPIO_NUM_7
@@ -23,19 +23,21 @@
 #define SPI_MASTER_CLK  GPIO_NUM_12
 // OTHER AFE FUNCTION PINS
 #define FORMAT0_pin     GPIO_NUM_17
-#define FORMAT1_pin     GPIO_NUM_14
-#define RESET_pin       GPIO_NUM_18
-#define CONTROL_MODE_pin    GPIO_NUM_38
+#define FORMAT1_pin     GPIO_NUM_18
+#define RESET_pin       GPIO_NUM_21
+#define CONTROL_MODE_pin    GPIO_NUM_36
 #define MCLK_pin      GPIO_NUM_20
 //#define XTAL_2_pin      GPIO_NUM_21
 
 
-//TODO: Configuirations for the clock source for the AFE
+//Configuirations for the clock source for the AFE
 #define SPI_DATA_CLK 16000000 // 16MHz
 #define AFE_MCLK 32000000 // 32 MHz
 
-//ADC register addresses, and pin masks
+// Configurations for the AFE subsystem
+#define TEST_GEN_ODR 1
 
+//ADC register addresses, and pin masks
 //ADC REGISTER ADDRESSES
 #define ADDRESS_ADC_CHANNEL_STANDBY  0x0 //each channel has its' own bit
 #define ADDRESS_ADC_CHANNEL_MODE_A 0x01 // determines filter type and decimation rate
@@ -143,6 +145,6 @@
 
 #define ADC_ERROR_CODE 0x0E00
 
-#define TEST_GEN_ODR 1
+
 
 #endif

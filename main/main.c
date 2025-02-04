@@ -34,6 +34,7 @@
 #include "driver/gptimer.h"
 #include "main.h"
 #include "AFE_controll.h"
+#include "AFE_Test.h"
 
 
 
@@ -56,10 +57,10 @@ uint8_t device_role = DEVICE_ROLE_SENDER;
 TaskHandle_t espnow_send_data_taskHandle = NULL;
 TaskHandle_t espnow_data_prep_taskHandle = NULL;
 TaskHandle_t TEST_espnow_stage_data_taskhandle = NULL;
-TaskHandle_t init_tasks_handle = NULL;
-TaskHandle_t Handle_Task_AFE_init_tasks = NULL;
+//TaskHandle_t init_tasks_handle = NULL;
 TaskHandle_t Handle_TEST_data_transfer_send = NULL;
 TaskHandle_t Handle_TEST_data_transfer_recv = NULL;
+extern TaskHandle_t Handle_Task_AFE_init_tasks;
 
 QueueHandle_t queue_image = NULL; // queue for raw image data, between memory location and data prep task
 static QueueHandle_t queue_espnow_stage = NULL; // queue for send data, between data prep task and send task
@@ -174,7 +175,7 @@ static esp_err_t user_espnow_init(void)
     peer->encrypt = false;
     memcpy(peer->peer_addr, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
 
-    uint8_t mac_peer[ESP_NOW_ETH_ALEN] = {0};
+    //uint8_t mac_peer[ESP_NOW_ETH_ALEN] = {0};
     esp_now_rate_config_t config = {
     .phymode = WIFI_PHY_MODE_HT40, // HT stand for high throughput with a bandiwth of 40MHz
     .rate = WIFI_PHY_RATE_MAX,
@@ -299,12 +300,13 @@ void espnow_data_prep_task(void *pv_parameters)
     {
         espnow_send_param_buff[element] = malloc(sizeof(espnow_send_param_t));
         espnow_data_buff[element] = malloc(sizeof(espnow_data_t));
-        espnow_send_param_buff[element]->buffer = espnow_data_buff[element];
+        espnow_send_param_buff[element]->buffer = (uint8_t *)espnow_data_buff[element];
 
         espnow_send_param_buff[element]->broadcast = true;
         espnow_send_param_buff[element]->len = sizeof(espnow_data_t);
         memcpy(espnow_send_param_buff[element]->dest_mac, s_example_broadcast_mac, ESP_NOW_ETH_ALEN);
     }
+    
 
     for (uint16_t element = 0; element < buffer_size; element++)
     {
@@ -313,6 +315,7 @@ void espnow_data_prep_task(void *pv_parameters)
         if (espnow_send_param_buff[element] == NULL)
             ESP_LOGE(USER_TAG, "espnow send param element in espnow send param buffer in position %d is not allocated", element);
     }
+    ESP_LOGI(USER_TAG, "Allocated memory for data transfer via ESPNOW\n Size of transmit buffer: %d", buffer_size);
 
     // TODO: needs to implement a circular buffer of espnow_data_t
     image_data_raw_t images[ESPNOW_NUM_PACKETS];
@@ -459,8 +462,8 @@ void xinit_send_data_tasks()
         ESP_LOGE(USER_TAG, "image queue was not initalized properly");
     }
 
-    if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 3000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
-    if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 3000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
+    if(xTaskCreatePinnedToCore(espnow_send_data_task, "espnow_send_data_task", 4000, pv_parameters, ESPNOW_SEND_TASK_PRIORITY, &espnow_send_data_taskHandle, 0) == pdPASS) task_count++;
+    if(xTaskCreatePinnedToCore(espnow_data_prep_task, "espnow_data_prep_task", 4000, pv_parameters, ESPNOW_DATA_PREP_TASK_PRIORITY, &espnow_data_prep_taskHandle, 0) == pdPASS) task_count++;
     //if(xTaskCreatePinnedToCore(TEST_espnow_stage_data_task, "TEST_espnow_stage_data_task", 3000, pv_parameters, TEST_GENERATE_DATA_TASK_PRIORITY, &TEST_espnow_stage_data_taskhandle, 1) == pdPASS) task_count++;
     if(task_count == 2)
     {
@@ -504,6 +507,7 @@ void espnow_receive_data_task()
 // At this point the received data should be sent on to the nexto core and free the allocated memory
 void espnow_parse_data_task()
 {
+    esp_log_level_set("*",ESP_LOG_DEBUG);
     for(;;)
     {
         espnow_data_t *image_data = NULL;
@@ -519,6 +523,8 @@ void espnow_parse_data_task()
                 ESP_LOGD(USER_TAG, "The %dnth received pixel is 0x%X \n", j, (image_data->payload[i]).data[j]);
             }
         }
+       //TEST_espnow_data_print(image_data);
+       
         free(image_data);
        
 
@@ -628,8 +634,8 @@ void TEST_core_data_transfer_send(QueueHandle_t queue)
 void TEST_core_data_transfer_init()
 {
      QueueHandle_t queue_TEST = xQueueCreate(200, sizeof(uint32_t));
-     xTaskCreatePinnedToCore(TEST_core_data_transfer_send, "Send_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_send, 0);
-     xTaskCreatePinnedToCore(TEST_core_data_transfer_recv, "Recieve_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_recv, 1);
+     xTaskCreatePinnedToCore((TaskFunction_t )TEST_core_data_transfer_send, "Send_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_send, 0);
+     xTaskCreatePinnedToCore((TaskFunction_t )TEST_core_data_transfer_recv, "Recieve_data", 3000, queue_TEST, 4, &Handle_TEST_data_transfer_recv, 1);
 
     for(;;)
     {
@@ -757,7 +763,7 @@ void TEST_espnow_transfer(uint32_t data_rate)
 
 void Start_App()
 {
-    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &init_tasks_handle,0);
+    xTaskCreatePinnedToCore(init_tasks, "init_tasks", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks,0);
     if(device_role == DEVICE_ROLE_SENDER)
     {
         
@@ -775,17 +781,20 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK( ret );
-    esp_log_level_set("*", ESP_LOG_WARN);
+    esp_log_level_set("*", ESP_LOG_INFO);
 
     // Creating task for testing espnow
     
     //Creating task for initializing and testing SPI
     //TEST_GPIO();
     //TEST_CLKSRC();
-    //TEST_SPI();
+    TEST_SPI();
+    //TEST_HW_AFE_command_loop();
     //Start_App();
-    TEST_espnow_transfer(2000);
+    //TEST_AFE_commands();
+    //TEST_espnow_transfer(10);
     //TEST_GPtimer();
+    //TEST_listen();
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
     

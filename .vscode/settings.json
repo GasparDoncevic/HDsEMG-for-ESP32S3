@@ -43,7 +43,8 @@
         "system_error": "c",
         "regex": "c",
         "tuple": "c",
-        "variant": "c"
+        "variant": "c",
+        "esp_random.h": "c"
     },
     "idf.gitPathWin": "C:\\Users\\Gaspar\\.espressif\\tools\\idf-git\\2.39.2\\cmd\\git.exe"
 }

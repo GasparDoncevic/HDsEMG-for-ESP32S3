@@ -64,9 +64,6 @@
 
 
 
-#define PRIORITY_TASK_GET_DATA 5
-#define PRIORITY_TASK_STAGE_DATA 6
-#define PRIORITY_TASK_SEND_CMD 7
 #define SIZE__SPI_SLAVE_QUEUE 300
 
 // strucutre for data which will be recieved by spi slave
@@ -80,33 +77,14 @@ typedef struct
 TaskHandle_t Handle_Task_AFE_init = NULL;
 TaskHandle_t Handle_Task_Stage_data = NULL;
 TaskHandle_t Handle_TASK_Get_data = NULL;
-
-//Task Handles for TESTS
-TaskHandle_t Handle_TEST_spi_loop = NULL;
-TaskHandle_t Handle_Task_TEST_loopback_receiver = NULL;
-TaskHandle_t Handle_Task_TEST_loopback_sender = NULL;
-TaskHandle_t Handle_Task_TEST_GPIO = NULL;
-TaskHandle_t Handle_Task_TEST_CLKSRC = NULL;
-TaskHandle_t Handle_TEST_Task_gen_data = NULL;
-//uint32_t TEST_data = 0;
-
-// TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
-uint8_t data_mock[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET] = {0xAA};
-spi_transaction_t transaction_mock = {
-        .rx_buffer = NULL,
-        .tx_buffer = &data_mock,
-        .length = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8,
-        .rxlength = 0,
-        .flags = 0
-    };
-// TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
-
-
+TaskHandle_t Handle_Task_send_sync_pulse = NULL;
+TaskHandle_t Handle_Task_AFE_init_tasks = NULL;
 
 QueueHandle_t queue_AFE_data = NULL;
 extern QueueHandle_t queue_image;
-SemaphoreHandle_t semaphore_generator = NULL;
+SemaphoreHandle_t semaphore_sync = NULL;
 SemaphoreHandle_t semaphore_spi = NULL;
+uint8_t FLG_Config_done = 0;
 
 
 static const char *TAG_AFE = "AFE";
@@ -114,8 +92,8 @@ static const char *TAG_AFE = "AFE";
 static spi_slave_interface_config_t device_spi_slave;
 static spi_device_interface_config_t device_spi_master[AFE_NUM_OF_ADC];
 static spi_bus_config_t bus_spi_slave, bus_spi_master;
-static spi_device_handle_t spi_master[AFE_NUM_OF_ADC];
-static uint8_t CS_pins_master[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
+spi_device_handle_t spi_master[AFE_NUM_OF_ADC];
+static uint8_t spi_master_CS_pins[4] = {SPI_MASTER_CS0, SPI_MASTER_CS1, SPI_MASTER_CS2, SPI_MASTER_CS3}; // These GPIO pins need to be manually picked from datasheet
 static gptimer_handle_t gptimer = NULL;
 
 
@@ -134,6 +112,19 @@ uint16_t AFE_command_get_response(spi_device_handle_t spi_device, spi_transactio
     spi_device_transmit(spi_device, transaction_get_response);
     ESP_LOGD(TAG_AFE, "Got response %x", response);
     return response;
+}
+
+
+uint8_t reverse_bits(uint8_t byte) {
+    byte = (byte & 0xF0) >> 4 | (byte & 0x0F) << 4;
+    byte = (byte & 0xCC) >> 2 | (byte & 0x33) << 2;
+    byte = (byte & 0xAA) >> 1 | (byte & 0x55) << 1;
+    return byte;
+}
+
+uint16_t reverse_bytes(uint16_t word) {
+    word = (word & 0xFF00) >> 8 | (word & 0x00FF) << 8;
+    return word;
 }
 
 // Function for sending commands to the AFE over a SPI device
@@ -158,7 +149,6 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
     uint16_t response = 0;
     transaction_response.tx_buffer = NULL;
     transaction_response.rxlength = 16;
-    transaction_response.rx_buffer = &response;
     transaction_response.flags = 0;
     esp_err_t result;
     uint8_t cmd_attempts_ADC = 0;
@@ -171,19 +161,19 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
         //Attempts sending the same command 3 times then quits AFE config 
         if (cmd_attempts_ADC >=3)
         {
-            ESP_LOGE(TAG_AFE, "All command attempts failed, exiting routine");
+            ESP_LOGE(TAG_AFE, "All command attempts failed, exiting routine \n sent data: 0x%x \n recieved response: 0x%x", (uint16_t)command[1], (uint16_t)response);
             return ESP_FAIL;
         }
         cmd_attempts_ADC++;
-        ESP_LOGI(TAG_AFE, "Transmitting command");
+        ESP_LOGV(TAG_AFE, "Transmitting command");
         
         result = spi_device_transmit(spi_device, &transaction_command);
         
-        ESP_LOGI(TAG_AFE, "Command sent");
+        ESP_LOGV(TAG_AFE, "Command sent");
 
         //Checking to see if retrying failed commands is enabled
-        if (will_retry == RETRY) AFE_command_get_response(spi_device, &transaction_response);
-    }while((uint16_t)ADC_ERROR_CODE == (uint16_t)(response));
+        if (RETRY == will_retry) response = AFE_command_get_response(spi_device, &transaction_response);
+    }while((uint16_t)ADC_ERROR_CODE == (uint16_t)(response) || (RETRY == will_retry && ((uint8_t)(command[1]) != (uint8_t)(response))));
 
     if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI command failed");
 
@@ -217,7 +207,17 @@ esp_err_t AFE_set_dout_format()
 // Simple wrapper function for setting the control mode for the AFE
 esp_err_t AFE_set_SPI_controll_mode(bool SPI_mode)
 {
-    return gpio_set_level(CONTROL_MODE_pin, SPI_mode);
+    esp_err_t result;
+    if (1 == SPI_mode)
+    {
+        result = gpio_set_level(CONTROL_MODE_pin, 1);
+    }
+    else
+    {
+        result = gpio_set_level(CONTROL_MODE_pin, 0);
+    }
+    
+    return result;
 }
 
 
@@ -236,7 +236,7 @@ esp_err_t AFE_reset(bool use_spi)
                 ESP_LOGE(TAG_AFE, "Failed to toggle RESET pin");
                 return result;
             }
-        vTaskDelay(500);
+        vTaskDelay(5);
         gpio_set_level(RESET_pin, 1);
 
     }else
@@ -303,70 +303,81 @@ esp_err_t AFE_sync_chain()
     return result;
 }
 
-// This TEST task is created when the testing GPTimer is used to generate data
-// This TEST tasks takes a semapohore and sends mock data using the spi master
-// This function assumes the spi master and slave are connected during testing 
-void TEST_Task_generate_data_w_SPI()
+void Task_send_sync_pulse()
 {
     for(;;)
     {
-        ESP_LOGV(TAG_AFE, "Taking semaphore to generate new data and send to SPI");
-        xSemaphoreTake(semaphore_generator, portMAX_DELAY);
-        ESP_LOGV(TAG_AFE, "Generator semaphore Taken");
-       // ESP_LOGI(TAG_AFE, "Sending transaciton located on %p which has data on %p", &transaction_mock, &data_mock);
+        ESP_LOGV(TAG_AFE, "Taking semaphore to send sync command");
+        xSemaphoreTake(semaphore_sync, portMAX_DELAY);
+        ESP_LOGV(TAG_AFE, "Sync semaphore taken");
+       // ESP_LOGI(TAG_AFE_TEST, "Sending transaciton located on %p which has data on %p", &transaction_mock, &data_mock);
        /*  for (uint8_t i = 0; i < sizeof(AFE_data_t); i++)
         {
-            ESP_LOGI(TAG_AFE, "Data to send is 0x%x", data_mock[i] ); 
+            ESP_LOGI(TAG_AFE_TEST, "Data to send is 0x%x", data_mock[i] ); 
         } */
 
-        if (ESP_OK != spi_device_queue_trans(spi_master[0], &transaction_mock, 0))
+        if (ESP_OK != AFE_sync_chain())
         {
-            ESP_LOGE(TAG_AFE, "Failed to queue data to spi master ");
+            ESP_LOGE(TAG_AFE, "Failed to send Sync command");
         }else
         {
-            ESP_LOGI(TAG_AFE, "sending new data via SPI");
+            ESP_LOGV(TAG_AFE, "Sync command sent");
         }
         // a taskYield is needed here to be invoked
-        //taskYIELD();
+        taskYIELD();
         //vTaskDelay(1000);
         
     }
 }
 
 
-// This is a function called in the GPTimer ISR and gives the semaphore so that the blocking task
-// TEST_Task_generate_data_w_SPI() can generate one new mock data
-void TEST_MOCK_AFE_create_data()
+// This function is register as the user ISR function when the GPTimer invokes an interrupt
+// This MUSTN'T call any blocking operations, including logging outputs
+// this function releases the sync semaphore used for timing 
+void Timer_sync_alarm()
 {
-    
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    //ESP_LOGI(TAG_AFE, "Giving back generator semaphore");
-    if (pdTRUE != xSemaphoreGiveFromISR(semaphore_generator, &xHigherPriorityTaskWoken))
+    //ESP_LOGI(TAG_AFE_TEST, "Giving back generator semaphore");
+    if (pdTRUE != xSemaphoreGiveFromISR(semaphore_sync, &xHigherPriorityTaskWoken))
     {
-        //ESP_LOGE(TAG_AFE, "Failed to give back semaphore");
+        //ESP_LOGE(TAG_AFE_TEST, "Failed to give back semaphore");
         return;
     }
-    //spi_device_transmit(spi_master[0], &transaction_mock);
     // a yield is needed is a higher priority task is awoken
     // which it is, because the semaphoreGive always triggers a high priority task to generate data
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     
 
     return;
+    //ESP_LOGI(TAG_AFE, "Hello from timer alarm");
 }
 
-
-// This function is register as the user ISR function when the GPTimer invokes an interrupt
-// This MUSTN'T call any blocking operations, including logging outputs
-void Timer_sync_alarm()
+uint8_t ADC_head_count()
 {
-    // this code is commented out during testing without AFE hardware
-    //AFE_sync_chain();
-    //AFE_sync_chain();
-    //ESP_LOGI(TAG_AFE, "Hello from timer alarm");
-    //TEST_GPTimer_hello();
-    TEST_MOCK_AFE_create_data();
-    //TEST_data++;
+    uint8_t ADC_num_active = 0;
+    spi_transaction_t call, response;
+    uint16_t respond_command = 0xFFFF;
+    call.length = 16;
+    call.tx_buffer = &respond_command;
+    call.rx_buffer = NULL;
+    uint16_t response_word = 0;
+    response.tx_buffer = NULL;
+    response.rxlength = 16;
+    response.rx_buffer = &response_word;
+    for(uint8_t ADC_slot = 0; ADC_slot < AFE_MAX_NUM_ADC; ADC_slot++)
+    {
+        // checking if ADC slot index is beyond the number of created spi devices
+        // This can occur if the maximum number of spi devices isn't created.  
+        if(ADC_slot >= sizeof(spi_master_CS_pins)) break;
+        spi_device_transmit(spi_master[ADC_slot], &call);
+        spi_device_transmit(spi_master[ADC_slot], &response);
+        if(response_word == ADC_ERROR_CODE)
+        {
+            ADC_num_active++;
+            response_word = 0;
+        }
+    }
+    return ADC_num_active;
 }
 
 // This function inits GPTimer at a frequency of 100us which triggers every 500us
@@ -381,7 +392,7 @@ esp_err_t AFE_Init_Sync_timer()
     }; */
     gptimer_config.clk_src = GPTIMER_CLK_SRC_APB;// giving the timer the max possible clock of 80MHz
     gptimer_config.direction = GPTIMER_COUNT_UP;
-    gptimer_config.resolution_hz = 1000*10;
+    gptimer_config.resolution_hz = 10000*10;
     gptimer_config.intr_priority = 0;
     gptimer_alarm_config_t gptimer_alarm; /* = {
         .alarm_count = 10000/2000,
@@ -400,7 +411,7 @@ esp_err_t AFE_Init_Sync_timer()
 
     ESP_LOGI(TAG_AFE, "starting timer");
     // Generating semaphore which will be used for the task to generate mock data
-    semaphore_generator = xSemaphoreCreateBinary();
+    semaphore_sync = xSemaphoreCreateBinary();
 
     ESP_ERROR_CHECK(gptimer_register_event_callbacks(gptimer, &callback, NULL));
     ESP_ERROR_CHECK(gptimer_enable(gptimer));
@@ -409,7 +420,7 @@ esp_err_t AFE_Init_Sync_timer()
 
 
     // generating task which will send new data via SPI
-    xTaskCreatePinnedToCore(TEST_Task_generate_data_w_SPI, "Generate_data_w_spi", 3000, NULL, PRIORITY_TASK_STAGE_DATA +5, &Handle_TEST_Task_gen_data, 1);
+    xTaskCreatePinnedToCore(Task_send_sync_pulse, "Task_send_sync_pulse", 4000, NULL, PRIORITY_TASK_STAGE_DATA +5, &Handle_Task_send_sync_pulse, 1);
     ESP_LOGI(TAG_AFE, "GPTimer and task configured");
 
     return ESP_OK;
@@ -461,7 +472,6 @@ esp_err_t AFE_config_clk_source()
 esp_err_t AFE_config()
 {
     esp_err_t result;
-
     // each iteration of the loop configures one ADC in the daisy-chain
     for(uint8_t device = 0; device < AFE_NUM_OF_ADC; device++)
     {
@@ -470,44 +480,39 @@ esp_err_t AFE_config()
         ESP_LOGI(TAG_AFE, "Starting config of device %d", device);
         //setting channel on standby (NONE)
         //First response after reset is alays error code
-        //if ((uint16_t)ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
+        if ((uint16_t)ADC_ERROR_CODE != AFE_command_get_response(spi_master[device], &initial_response)) ESP_LOGE(TAG_AFE, "ADC_Config: First response wasn't error code, maybe improper ADC restart");
 
         //Sending first command for channel stanby mode
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, (uint8_t) MASK_ADC_CH_EN_ALL);
-        if(result == ESP_FAIL) break;
+        if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_STANDBY, (uint8_t) MASK_ADC_CH_EN_ALL)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for channel standby mode");
         
         //Sending command for channel mode A
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_A,(uint8_t) MASK_ADC_CMAR_SINC5|MASK_ADC_CMAR_DEC_32);
-        if(result == ESP_FAIL) break;
+        if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_A,(uint8_t) MASK_ADC_CMAR_SINC5|MASK_ADC_CMAR_DEC_32)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for channel mode A");
 
         //Sending command for channel mode select
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL,(uint8_t) MASK_ADC_CMSR_ALL_A);
-        if(result == ESP_FAIL) break;
+        if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL,(uint8_t) MASK_ADC_CMSR_ALL_A)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for channel mode select");
 
         //Sending command for power mode
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t)MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE,(uint8_t) MASK_ADC_PWR_MODE_LOW|MASK_ADC_LVDS_DIS|MASK_ADC_MCLK_DIV_32);
-        if(result == ESP_FAIL) break;
+        if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t)MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE,(uint8_t) MASK_ADC_PWR_MODE_LOW|MASK_ADC_LVDS_DIS|MASK_ADC_MCLK_DIV_32)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for power mode");
 
         //Sending command for general config
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CONFIG, (uint8_t)0x08);
-        if(result == ESP_FAIL) break;
+        if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CONFIG, (uint8_t)0x08)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for general config");
 
         //Sending command for interface config
-        result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG,(uint8_t) 0x00|MASK_ADC_IC_DCLK_DIV_2);
-        if(result == ESP_FAIL)
-        {
-            break;
-        } else if(result == ESP_OK)
-        {
-            ESP_LOGI(TAG_AFE, "Device %d configured successfully", device);
-        }
-
-        AFE_reset(true);
+         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG,(uint8_t) 0x00|MASK_ADC_IC_DCLK_DIV_2)))
+            ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for interface config");
+        
+        ESP_LOGI(TAG_AFE, "Device %d configured", device);
         //RESET command needs to be issued
         // TODO: Do i need to free spi buses between devices? maybe...
     }
-
-    if (ESP_OK == result) ESP_LOGI(TAG_AFE, "All devices were configured successfully");
+    
+    AFE_reset(false);
+    if (ESP_OK == result) ESP_LOGI(TAG_AFE, "All devices were configured");
     return result;
 }
 
@@ -527,7 +532,7 @@ void slave_post_setup_cb(spi_slave_transaction_t *trans)
 // This Task needs to initialize two spi buses. one must be a master with multiple /CS pins to configure multiple ADCs 
 //The second bus is a slave which recieves data from the ADC daisy-chain
 // This task must also handle AD configuration
-// TODO: remember to initialize Xtal pins for source for ADC chip
+//This task does not generate data acquisition tasks 
 void Task_AFE_init()
 {
     for(;;)
@@ -595,7 +600,7 @@ void Task_AFE_init()
         //Initializing master device for ADC daisy-chain config
         (device_spi_master[device]).clock_speed_hz = SPI_DATA_CLK;
         (device_spi_master[device]).mode = 0;
-        (device_spi_master[device]).spics_io_num = CS_pins_master[device];
+        (device_spi_master[device]).spics_io_num = spi_master_CS_pins[device];
         (device_spi_master[device]).queue_size = 10;
         (device_spi_master[device]).duty_cycle_pos = 128;
         (device_spi_master[device]).cs_ena_posttrans = 3;
@@ -613,12 +618,29 @@ void Task_AFE_init()
     // This delay is required in order to allow all of the settings for the spi slave to settle into the register
     //  I had to dicover this empyrically, because ofcourse the documentation doesn't say anything
     vTaskDelay(100/portTICK_PERIOD_MS);
+    
+    // Now we count the number of connected SPI devices, and remove excess spi devices
+    //the array of of CS pins is an array of bytes so calling sizeof gives the number of elements in the array
+   /*  uint8_t ADC_num_active = ADC_head_count();
+    if (ADC_num_active < sizeof(spi_master_CS_pins))
+    {
+        for (size_t ADC_slot = sizeof(spi_master_CS_pins)-1; ADC_slot >= ADC_num_active; ADC_slot--)
+        {
+            spi_bus_remove_device(spi_master[ADC_slot]);
+        }
+        
+        
+    }
+     */
+    // reseting the AFE chip after configuring the ESP device
+    AFE_reset(false);
 
     ret = AFE_config();
     if (ret != ESP_OK) ESP_LOGE(TAG_AFE, "AFE configuration failed");
 
-    if (ESP_OK != AFE_Init_Sync_timer()) ESP_LOGE(TAG_AFE, "Failed to set sync timer for AFE");
+    //if (ESP_OK != AFE_Init_Sync_timer()) ESP_LOGE(TAG_AFE, "Failed to set sync timer for AFE");
     ESP_LOGI(TAG_AFE, "AFE initialization complete");
+    FLG_Config_done = 1;
     vTaskDelete(NULL);
     }
     
@@ -635,8 +657,8 @@ void Task_AFE_init()
 // of just blowing through the max number of transactions
 void Task_AFE_get_data()
 {
-    // 
     
+    uint32_t bad_data_counter = 0;
     spi_slave_transaction_t transactions[300];
     uint16_t transaction = 0;
     spi_slave_transaction_t* transaction_result = NULL;
@@ -658,9 +680,13 @@ void Task_AFE_get_data()
     
     // Allocating memory for a lot of transactions
     // TODO: add malloc call for each new recieved data to copy to queue
+    uint8_t transaction_queues_busy = 0;
     for(;;)
     {
-        ESP_LOGI(TAG_AFE, "Starting set of transaction queues");
+        //if (0 == FLG_Config_done) continue; /**< waiting for the configuration of the AFE to finish before getting responses */
+        
+        transaction_queues_busy = 0;
+        ESP_LOGD(TAG_AFE, "Starting set of transaction queues");
         for (uint8_t i = 0; i < 200; i++)
         {
             
@@ -669,13 +695,14 @@ void Task_AFE_get_data()
             if(ESP_OK != spi_slave_queue_trans(SPI3_HOST, (spi_slave_transaction_t*) &transactions[transaction], 0))
             {
                 ESP_LOGE(TAG_AFE, "Failed to queue spi slave transaction");
+                transaction_queues_busy++;
                 break;
             }
             transaction++;
             transaction = transaction % 300;
         }
         
-        ESP_LOGI(TAG_AFE, "Starting set of transaction results");
+        ESP_LOGD(TAG_AFE, "Starting set of transaction results");
         // this portion handles recieveing results and passing valid data to datat staging via queue
         for (uint8_t i = 0; i < 200; i++)
         {
@@ -684,6 +711,7 @@ void Task_AFE_get_data()
             if(ESP_ERR_TIMEOUT ==  spi_slave_get_trans_result(SPI3_HOST, &transaction_result, 0))
             {
                 ESP_LOGE(TAG_AFE, "Failed to get spi slave transaction result");
+                transaction_queues_busy++;
                 break; 
             }
             recieved_data = (AFE_data_t*)(transaction_result->rx_buffer);
@@ -693,28 +721,47 @@ void Task_AFE_get_data()
             {
                 if ((0xE0 & recieved_data->data[header]) != 0){
                     ESP_LOGE(TAG_AFE, "Data packet has an error flag raised, has unsettled filter or repeated data, dropping whole image data");
+                    ESP_LOGE(TAG_AFE, "header recieved is 0x%x with data 0x%x ", recieved_data->data[header], (uint16_t)recieved_data->data[header+1]);
+                    bad_data_counter++;
+                    if (bad_data_counter > 50)
+                    {
+                        ESP_LOGE(TAG_AFE, "Too many bad data packets, resetting AFE");
+                        AFE_reset(false);
+                        AFE_config();
+                        bad_data_counter = 0;
+                    }
+                    
                     is_data_valid = false;
                     break;
                 }
             }
-            // the malloc call needs to happen somewhere here because it would be nice if i could malloc after i decide if I even want to keep the data
+            
             //ESP_LOGI(TAG_AFE, "Sending data to queue");
             AFE_data_t *data = malloc(sizeof(AFE_data_t));
-            memcpy(data, recieved_data, sizeof(AFE_data_t));
-            //transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
-            ESP_LOGI(TAG_AFE, "Sending data to queue");
-            if(is_data_valid == true)
+            if (NULL != data && NULL != recieved_data)
             {
-                if (pdFALSE == xQueueSend(queue_AFE_data, &data, 0))
+                memcpy(data, recieved_data, sizeof(AFE_data_t));
+                //transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
+                ESP_LOGI(TAG_AFE, "Sending data to queue");
+                if(is_data_valid == true)
                 {
-                    ESP_LOGE(TAG_AFE, "Error in sending data to trasaction queue. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
-                    
+                    if (pdFALSE == xQueueSend(queue_AFE_data, &data, 0))
+                    {
+                        ESP_LOGE(TAG_AFE, "Error in sending data to trasaction queue. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
+                        
+                    }
                 }
             }
+            
+            
+            
              
 
         }
-        //vTaskDelay(2);
+        // If both enqueueing and dequeueing a transaction failed, a preparation and processing fo transactions will be paused
+        // for 30ms which estimates around is 60 transactions 
+        if(transaction_queues_busy == 2) vTaskDelay(30/portTICK_PERIOD_MS);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
     }
 
 
@@ -723,14 +770,15 @@ void Task_AFE_get_data()
 // This task recieves unprocessed AFE data and removes the channel headers from the data to get a more compresed data format
 void Task_AFE_stage_data()
 {
-    AFE_data_t *unparsed_data;
+    AFE_data_t *unparsed_data = NULL;
     image_data_raw_t image_filtered;
 
     vTaskDelay(1000/portTICK_PERIOD_MS);
     for(;;)
     {
-        ESP_LOGI(TAG_AFE, "Getting unparsed data");
+        ESP_LOGV(TAG_AFE, "Getting unparsed data");
         xQueueReceive(queue_AFE_data, &unparsed_data ,portMAX_DELAY);
+        if(NULL == unparsed_data) ESP_LOGE(TAG_AFE, "Failed to get unparsed data");
         uint16_t image_point = 0;
         image_filtered.len = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH;
         // The format od the unparsed data is 1 byte header and 2 bytes data
@@ -739,6 +787,7 @@ void Task_AFE_stage_data()
             image_filtered.data[image_point] = unparsed_data->data[byte] << 8 | unparsed_data->data[byte+1];
             image_point++;
         }
+        ESP_LOGV(TAG_AFE, "freeing unparsed data");
         free(unparsed_data);
         image_data_raw_t *image_stage = malloc(sizeof(image_data_raw_t));
         ESP_LOGD(TAG_AFE, "Staged new data on memory locaiton %p", image_stage);
@@ -753,10 +802,10 @@ void Task_init_AFE_tasks()
 {
     // Initializing queue for AFE data
     for(;;){
-        // Setting up test resources
-        memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
-        // Setting up test resources
 
+        // Setting up test resources // This is done by test functions
+        // memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+        // Setting up test resources
         uint8_t created_tasks = 0;
         // Verifying if the image queue resource was generated by the first core, if not waiting and retrying
         if (queue_image == NULL)
@@ -794,134 +843,38 @@ void Task_init_AFE_tasks()
 
 }
 
+void TEST_TASK_HW_AFE_command_loop()
+{
+    uint8_t gpio_write = 0x01;
+    esp_err_t result;
 
-// Function intended for seeing if the spi pins really do output the correct data and if the signals are correctly routed
-// spi3 is slave, spi2 is master
-void Task_TEST_loopback_sender()
-{   
-    bool use_command = false;
-    spi_transaction_t data_spi2;
-    memset(&data_spi2, 0, sizeof(spi_transaction_t));
-    uint8_t data[2] = {0x04, 0x04};
-    data_spi2.length = 16;
-    data_spi2.tx_buffer = &data;
-    data_spi2.rx_buffer = NULL;
+    AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE|ADDRESS_ADC_GPIO_CONTROL, 0x01);
     for(;;)
-    {   
-        if(use_command == false)
+    {
+        
+        result = AFE_Send_Command(spi_master[0], RETRY, MASK_ADC_WRITE|ADDRESS_ADC_GPIO_WRITE, gpio_write);
+        if(result != ESP_OK)
         {
-            ESP_LOGI(TAG_AFE, "Sending data via spi on master device");
-            spi_device_transmit(spi_master[0], &transaction_mock);
-            vTaskDelay(500/portTICK_PERIOD_MS);
-            data[1]++;
-        }else
-        {
-            ESP_LOGI(TAG_AFE, "Sending command via command API");
-            AFE_Send_Command(spi_master[0], NO_RETRY, data[0], data[1]);
-            vTaskDelay(500/portTICK_PERIOD_MS);
-            data[1]++;
+            ESP_LOGE(TAG_AFE, "Failed to send data");
+            return;
         }
-        
+        gpio_write++;
+        gpio_write = gpio_write % 2;
+        vTaskDelay(10/portTICK_PERIOD_MS);
     }
-}
-void Task_TEST_loopback_receiver()
-{
-    spi_slave_transaction_t data_spi3;
-    memset(&data_spi3, 0, sizeof(spi_slave_transaction_t));
-    uint8_t data[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET];
-    uint16_t recieved_data = 0;
-    data_spi3.length = sizeof(AFE_data_t)*8;
-    data_spi3.rx_buffer = &data;
-    data_spi3.tx_buffer = NULL;
-    spi_slave_transaction_t * spi_result = NULL;
-    //A delay needs to be added for the slave configuration
-    vTaskDelay(50/portTICK_PERIOD_MS);
-    for(;;)
-    {
-        /* ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
-        spi_slave_transmit(SPI3_HOST, &data_spi3, portMAX_DELAY);        
-        ESP_LOGI(TAG_AFE, "Recieved data is 0x%x", recieved_data); 
-        vTaskDelay(1); */
-        ESP_LOGI(TAG_AFE, "Recieving data via spi on slave device");
-        spi_slave_queue_trans(SPI3_HOST, &data_spi3, portMAX_DELAY);
 
-        
-        spi_slave_get_trans_result(SPI3_HOST, &spi_result, portMAX_DELAY);
-        ESP_LOGI(TAG_AFE, "Recieved new packet");
-        for (uint8_t i = 0; i < sizeof(AFE_data_t)/2; i++)
-        {
-            ESP_LOGD(TAG_AFE, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer) +1) ); 
-        }
-        
-        vTaskDelay(100);
-    }
 }
-void TEST_spi_loopback()
+
+void TEST_HW_AFE_command_loop()
 {
     
-    
-    xTaskCreatePinnedToCore(Task_TEST_loopback_receiver, "Receiver", 3000, NULL, 3, &Handle_Task_TEST_loopback_receiver, 0);
-    //xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, 3, &Handle_Task_TEST_loopback_sender, 1);
-    for(;;)
+    // Setting up test resources
+    xTaskCreatePinnedToCore(Task_AFE_init, "AFE_init", 3000, NULL, configMAX_PRIORITIES-2, &Handle_Task_AFE_init_tasks, 1);
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+    xTaskCreatePinnedToCore(TEST_TASK_HW_AFE_command_loop, "HW_AFE_command_loop", 3000, NULL, PRIORITY_TASK_SEND_CMD, &Handle_Task_AFE_init_tasks, 1);
+
+    for (;;)
     {
-        vTaskDelete(NULL);    
-        //ESP_LOGI(TAG_AFE, "Waiting a bit before sending");
-        //vTaskDelay(500/portTICK_PERIOD_MS);
-        //vTaskDelay(1);
-        //data++;
+        /* code */
     }
-    
-
-}
-
-void TEST_SPI()
-{
-    // Filling up test resource
-    memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
-    // Filling up test resource
-    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
-    xTaskCreatePinnedToCore(TEST_spi_loopback, "TEST_spi_loop", 3000, NULL, 6, &Handle_TEST_spi_loop, 1);
-
-}
-
-void Task_TEST_GPIO()
-{
-    uint8_t mode = 0;
-    for(;;)
-    { 
-        mode++;
-        mode = mode % 2;
-        ESP_LOGI(TAG_AFE, "Changing controll mode %d", mode);
-        if (ESP_OK != AFE_set_SPI_controll_mode(mode)) ESP_LOGE(TAG_AFE, "Failed to toggle SPI mode pin");
-        vTaskDelay(500/portTICK_PERIOD_MS);
-    }
-
-}
-
-void TEST_GPIO()
-{
-    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
-    xTaskCreatePinnedToCore(Task_TEST_GPIO, "Task_TEST_GPIO", 3000, NULL, 6, &Handle_Task_TEST_GPIO, 1);
-}
-void Task_TEST_CLKSRC()
-{
-    ESP_LOGI(TAG_AFE, "Configuring Clock source");
-    AFE_config_clk_source();
-    ESP_LOGI(TAG_AFE, "Clock source configured");
-    for(;;)
-    {
-        vTaskDelay(300/portTICK_PERIOD_MS);
-    }
-}
-
-void TEST_CLKSRC()
-{
-    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
-    xTaskCreatePinnedToCore(Task_TEST_CLKSRC, "Task_TEST_CLKSRC", 3000, NULL, 6, &Handle_Task_TEST_CLKSRC, 1);
-}
-
-void TEST_GPtimer()
-{
-    AFE_Init_Sync_timer();
-    return;
 }
