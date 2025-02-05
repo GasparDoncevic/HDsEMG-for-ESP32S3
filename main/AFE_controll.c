@@ -630,7 +630,7 @@ void Task_AFE_init()
      */
     // reseting the AFE chip after configuring the ESP device
     AFE_reset(false);
-
+    vTaskDelay(100/portTICK_PERIOD_MS);
     ret = AFE_config();
     if (ret != ESP_OK) ESP_LOGE(TAG_AFE, "AFE configuration failed");
 

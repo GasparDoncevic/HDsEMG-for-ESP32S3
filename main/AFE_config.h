@@ -31,7 +31,7 @@
 
 
 //Configuirations for the clock source for the AFE
-#define SPI_DATA_CLK 16000000 // 16MHz
+#define SPI_DATA_CLK 10000000 // 16MHz The maximum possible SCLK for the AFE is 10MHz, derived from minimum T_SCLK of 100ns
 #define AFE_MCLK 32000000 // 32 MHz
 
 // Configurations for the AFE subsystem

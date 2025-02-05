@@ -372,36 +372,35 @@ void TEST_TASK_listen()
     }
     vTaskDelay(10000/portTICK_PERIOD_MS);
 
+    /** Setting GPIO pins to outputs and enabling them*/
+    result = AFE_Send_Command(spi_master[0], RETRY, MASK_ADC_WRITE | ADDRESS_ADC_GPIO_CONTROL, 0x8F);
+
     for(;;)
-    {
-        AFE_reset(false);
-        vTaskDelay(10/portTICK_PERIOD_MS);
-        //AFE_config();
-        
-        
+    {   
         /** Toggling GPIO pins on ADC1 */
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_READ | ADDRESS_ADC_CHIP_STATUS, 0x00);
         AFE_command_get_response(spi_master[0]);
         ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC1");
-        AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x0f);
+        AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x1f);
         AFE_command_get_response(spi_master[0]);
-        vTaskDelay(50/portTICK_PERIOD_MS);
+        vTaskDelay(100/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
         AFE_command_get_response(spi_master[0]);
+
         
-        ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC2");
+       /*  ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC2");
         vTaskDelay(50/portTICK_PERIOD_MS);
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x0f);
         AFE_command_get_response(spi_master[1]);
         vTaskDelay(50/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
-        AFE_command_get_response(spi_master[1]);
+        AFE_command_get_response(spi_master[1]); */
 
         //AFE_command_get_response(spi_master[0], &transaction);
         //ESP_LOGD(TAG_AFE_TEST, "Got response %x", data_resp);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
+        vTaskDelay(100/portTICK_PERIOD_MS);
     }
 }
 

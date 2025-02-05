@@ -788,13 +788,13 @@ void app_main(void)
     //Creating task for initializing and testing SPI
     //TEST_GPIO();
     //TEST_CLKSRC();
-    TEST_SPI();
+    //TEST_SPI();
     //TEST_HW_AFE_command_loop();
     //Start_App();
     //TEST_AFE_commands();
     //TEST_espnow_transfer(10);
     //TEST_GPtimer();
-    //TEST_listen();
+    TEST_listen();
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
     
