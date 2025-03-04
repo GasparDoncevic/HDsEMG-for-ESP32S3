@@ -8,5 +8,7 @@ void TEST_GPtimer();
 void TEST_AFE_commands();
 void TEST_HW_AFE_command_loop();
 void TEST_listen();
+void TEST_dataChain();
+void TEST_readConfig();
 
 #endif

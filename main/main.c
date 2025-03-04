@@ -781,7 +781,7 @@ void app_main(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK( ret );
-    esp_log_level_set("*", ESP_LOG_INFO);
+    esp_log_level_set("*", ESP_LOG_DEBUG);
 
     // Creating task for testing espnow
     
@@ -794,7 +794,10 @@ void app_main(void)
     //TEST_AFE_commands();
     //TEST_espnow_transfer(10);
     //TEST_GPtimer();
-    TEST_listen();
+    //TEST_listen();
+    TEST_dataChain();
+    //TEST_readConfig();
+
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
     

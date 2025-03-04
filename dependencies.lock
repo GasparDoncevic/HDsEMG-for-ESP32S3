@@ -1,21 +1,24 @@
 dependencies:
-  espressif__cmake_utilities:
-    component_hash: null
+  espressif/cmake_utilities:
+    dependencies: []
     source:
       path: E:\Repos\espWirelessDataAcquisition\HDsEMG-for-ESP32S3\components\espressif__cmake_utilities
       type: local
     version: 0.5.3
-  espressif__esp-now:
-    component_hash: null
+  espressif/esp-now:
+    dependencies: []
     source:
       path: E:\Repos\espWirelessDataAcquisition\HDsEMG-for-ESP32S3\components\espressif__esp-now
       type: local
     version: 2.5.0
   idf:
-    component_hash: null
     source:
       type: idf
-    version: 5.2.1
-manifest_hash: f063fdb1cbfaf311b4ec7a77dc023291974e5470651366b2116ed877bc8cbd2c
+    version: 5.4.0
+direct_dependencies:
+- espressif/cmake_utilities
+- espressif/esp-now
+- idf
+manifest_hash: 448f892b475e8fadd8ab1797120b85200c4bc4c52eff32122260dd118d406959
 target: esp32s3
-version: 1.0.0
+version: 2.0.0

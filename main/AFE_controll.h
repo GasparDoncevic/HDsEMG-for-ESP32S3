@@ -2,7 +2,7 @@
 #define AFE_CONTROLL_H
 //USER DEFINES
 #define AFE_NUM_OF_ADC 1
-#define AFE_NUM_OF_ADC_CH 1
+#define AFE_NUM_OF_ADC_CH 4
 #define AFE_SIZE_DATA_PACKET 3
 #define AFE_COMMAND_LEN 16
 #define ADC_CHANNEL_NUM 8
@@ -45,6 +45,7 @@ esp_err_t AFE_reset(bool use_spi);
 esp_err_t AFE_config_clk_source();
 esp_err_t AFE_Init_Sync_timer();
 esp_err_t AFE_sync_chain();
+void reverseN_bytes(uint8_t *data, uint32_t len);
 
 //void AFE_controll_send_command();
 // void TEST_SPI();

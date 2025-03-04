@@ -30,7 +30,7 @@ typedef struct
     uint8_t data[AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET];
 } AFE_data_t;
 
-
+// Task pointers for production code
 //Task handles for production code
 extern TaskHandle_t Handle_Task_AFE_init;
 extern TaskHandle_t Handle_Task_Stage_data;
@@ -47,6 +47,10 @@ TaskHandle_t Handle_TEST_AFE_subsystem = NULL;
 TaskHandle_t Handle_TEST_AFE_commands = NULL;
 TaskHandle_t Handle_TEST_GPtimer = NULL;
 TaskHandle_t Handle_TEST_Task_listen = NULL;
+TaskHandle_t Handle_TEST_dataChain = NULL;
+TaskHandle_t Handle_TEST_Task_popImgData = NULL;
+TaskHandle_t Handle_TEST_Task_peekData = NULL;
+TaskHandle_t Handle_TEST_Task_readConfig = NULL;
 //uint32_t TEST_data = 0;
 
 // TEST global variables THESE SHOULD BE COMMENTED OUT WHEN NOT TESTING
@@ -184,6 +188,7 @@ void Task_TEST_loopback_sender()
     data_spi2.length = 16;
     data_spi2.tx_buffer = &data;
     data_spi2.rx_buffer = NULL;
+    vTaskDelay(1000/portTICK_PERIOD_MS);
     for(;;)
     {   
         if(use_command == false)
@@ -212,7 +217,7 @@ void Task_TEST_loopback_receiver()
     data_spi3.tx_buffer = NULL;
     spi_slave_transaction_t * spi_result = NULL;
     //A delay needs to be added for the slave configuration
-    vTaskDelay(50/portTICK_PERIOD_MS);
+    vTaskDelay(1000/portTICK_PERIOD_MS);
     for(;;)
     {
         /* ESP_LOGI(TAG_AFE_TEST, "Recieving data via spi on slave device");
@@ -224,13 +229,19 @@ void Task_TEST_loopback_receiver()
 
         
         spi_slave_get_trans_result(SPI3_HOST, &spi_result, portMAX_DELAY);
-        ESP_LOGI(TAG_AFE_TEST, "Recieved new packet");
-        for (uint8_t i = 0; i < sizeof(AFE_data_t)/2; i++)
+        ESP_LOGI(TAG_AFE_TEST, "Recieved new packet with len %d", spi_result->trans_len);
+        for (uint8_t i = 0; i < (spi_result->trans_len)/(2*8); i++)
         {
-            ESP_LOGD(TAG_AFE_TEST, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer) +1) ); 
+            ESP_LOGD(TAG_AFE_TEST, "Recieved data is 0x%x", *((uint16_t *)(spi_result->rx_buffer +i))); 
+        }
+        reverseN_bytes(spi_result->rx_buffer, (spi_result->trans_len/(8)));
+        for (uint8_t i = 0; i < (spi_result->trans_len)/(2*8); i++)
+        {
+            ESP_LOGD(TAG_AFE_TEST, "Reversed data is 0x%x", *((uint16_t *)(spi_result->rx_buffer +i))); 
         }
         
-        vTaskDelay(100);
+        
+        //vTaskDelay(10);
     }
 }
 void TEST_spi_loopback()
@@ -255,7 +266,7 @@ void TEST_SPI()
 {
     esp_log_level_set(TAG_AFE_TEST, ESP_LOG_DEBUG);
     // Filling up test resource
-    memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+    memset(&data_mock, 0x01020304, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
     // Filling up test resource
     xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
     xTaskCreatePinnedToCore(TEST_spi_loopback, "TEST_spi_loop", 3000, NULL, 6, &Handle_TEST_spi_loop, 1);
@@ -288,7 +299,7 @@ void Task_TEST_CLKSRC()
     ESP_LOGI(TAG_AFE_TEST, "Clock source configured");
     for(;;)
     {
-        vTaskDelay(300/portTICK_PERIOD_MS);
+        vTaskDelay(30000/portTICK_PERIOD_MS);
     }
 }
 
@@ -373,7 +384,12 @@ void TEST_TASK_listen()
     vTaskDelay(10000/portTICK_PERIOD_MS);
 
     /** Setting GPIO pins to outputs and enabling them*/
-    result = AFE_Send_Command(spi_master[0], RETRY, MASK_ADC_WRITE | ADDRESS_ADC_GPIO_CONTROL, 0x8F);
+    for (uint8_t i = 0; i < AFE_NUM_OF_ADC; i++)
+    {
+        result = AFE_Send_Command(spi_master[i], RETRY, MASK_ADC_WRITE | ADDRESS_ADC_GPIO_CONTROL, 0x8F);    
+    }
+    
+    //result = AFE_Send_Command(spi_master[0], RETRY, MASK_ADC_WRITE | ADDRESS_ADC_GPIO_CONTROL, 0x8F);
 
     for(;;)
     {   
@@ -383,29 +399,35 @@ void TEST_TASK_listen()
         ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC1");
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x1f);
         AFE_command_get_response(spi_master[0]);
-        vTaskDelay(100/portTICK_PERIOD_MS);
+        vTaskDelay(500/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
         AFE_command_get_response(spi_master[0]);
+        vTaskDelay(500/portTICK_PERIOD_MS);
 
         
-       /*  ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC2");
-        vTaskDelay(50/portTICK_PERIOD_MS);
+        /* ESP_LOGD(TAG_AFE_TEST, "Toggling pins on ADC2");
+        
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x0f);
         AFE_command_get_response(spi_master[1]);
         vTaskDelay(50/portTICK_PERIOD_MS);
 
         AFE_Send_Command(spi_master[1], NO_RETRY, MASK_ADC_WRITE | 0x0F, 0x00);
-        AFE_command_get_response(spi_master[1]); */
-
+        AFE_command_get_response(spi_master[1]);
+        vTaskDelay(50/portTICK_PERIOD_MS); */
         //AFE_command_get_response(spi_master[0], &transaction);
         //ESP_LOGD(TAG_AFE_TEST, "Got response %x", data_resp);
-        vTaskDelay(100/portTICK_PERIOD_MS);
+        
     }
 }
 
 /**
+ * @fn TEST_listen
+ * 
  * @brief This function configures the esp32s3 preipherals and starts listening for the output of the connected ADC
+ * 
+ * @details This function configures the esp32s3 peripherals and attempts to send commands to the connected ADC daisychain
+ *          aswell as read the responses from the ADCs
  */
 void TEST_listen()
 {
@@ -413,4 +435,126 @@ void TEST_listen()
     xTaskCreatePinnedToCore(TEST_TASK_listen, "Task_listen", 3000,NULL, 6, &Handle_TEST_Task_listen, 1);
 
     return;
+}
+
+/**
+ * @fn TEST_Task_peekDataRaw
+ * 
+ * @brief This function is intended to peek at the data raw of the AFE subsystem before its header data is removed
+ * 
+ * @details This function is peeks at the unbeheaded data before the header is removed by the staging task. This function slows down the execution of the overall code
+ *          because the task prints out all of the data recieved fomr the ADCs which takes a lot of time and creates a lot of overhead in the system and hinders execution
+ *          at higer sampling rates, unless the execution of the task is moved to another core.
+ */
+void TEST_Task_peekDataRaw()
+{
+    AFE_data_t *data = NULL;
+    while (queue_AFE_data == NULL)
+    {
+        ESP_LOGI(TAG_AFE_TEST, "Waiting for queue_AFE_data queue to be created");
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+    }
+    
+
+    for (;;)
+    {
+        if (ESP_FAIL == xQueuePeek(queue_AFE_data, &data, 0)) vTaskDelay(500/portTICK_PERIOD_MS);
+        else
+        {
+            ESP_LOGI(TAG_AFE_TEST, "Peeked data from image queue");
+            for (uint8_t i = 0; i < sizeof(image_data_raw_t); i++)
+            {
+                ESP_LOGI(TAG_AFE_TEST, "Data is 0x%x", data->data[i]);
+            }
+            vTaskDelay(100/portTICK_PERIOD_MS);
+        }
+    }
+}
+
+/**
+ * @fn TEST_Task_popImgData
+ * 
+ * @brief This function is intended to recieve the data of the AFE subsystem after its header data is removed to remove the data from the image queue
+ */
+void TEST_Task_popImgData()
+{
+    AFE_data_t *data = NULL;
+    uint16_t data_img = 0;
+
+    while (queue_image == NULL)
+    {
+        ESP_LOGI(TAG_AFE_TEST, "Waiting for queue_image queue to be created");
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+    }
+
+    for (;;)
+    {
+        if (ESP_FAIL == xQueueReceive(queue_image, &data, portMAX_DELAY)){
+            vTaskDelay(500/portTICK_PERIOD_MS);
+        }
+        else
+        {
+            if (data == NULL)
+            {
+                ESP_LOGE(TAG_AFE_TEST, "unexpected reception of NULL data");
+                vTaskDelay(500/portTICK_PERIOD_MS);
+                continue;
+            }
+            ESP_LOGI(TAG_AFE_TEST, "Peeked data from image queue");
+            ESP_LOGI(TAG_AFE_TEST, "Data size is  %d", data->data[0]);
+            for (uint8_t i = 1; i < (sizeof(image_data_raw_t)); i+=2)
+            {
+                data_img = (data->data[i])<<8 | data->data[i+1];
+                ESP_LOGI(TAG_AFE_TEST, "Data is 0x%x", data_img);
+            }
+            //vTaskDelay(50/portTICK_PERIOD_MS);
+        }
+    }
+}
+
+/**
+ * @fn TEST_dataChain
+ * 
+ * @brief This function is intended to test the data chain of the ADC daisychain
+ * 
+ * @details This function is intended to test the data chain of the ADC daisychain by sending sampling commands commands to the ADCs and reading the incomming data from the daisy chain.
+ *          The functions runs the production tasks for AFE subsystem and expects the AFE system to properly parse the incomming data from the ADCs.
+ *          This test should be run at low sampling rates to ensure that each image can be peeked at before it is removed by staging task 
+ */
+void TEST_dataChain()
+{
+    queue_image = xQueueCreate(300, sizeof(AFE_data_t));
+    //xTaskCreatePinnedToCore(TEST_Task_peekDataRaw, "Task_peekDataRaw", 3000, NULL, 6, &Handle_TEST_Task_peekData, 0);
+    xTaskCreatePinnedToCore(TEST_Task_popImgData, "Task_peekData", 3000, NULL, 3, &Handle_TEST_Task_popImgData, 0);
+    Task_init_AFE_tasks();
+    
+}
+
+void TEST_TASK_readconfig()
+{
+    AFE_config();
+    for (;;)
+    {
+        uint16_t response = 0;
+        AFE_config();
+        for(uint8_t reg = 0; reg <= 0x57; reg++)
+        {
+            AFE_Send_Command(spi_master[0], NO_RETRY, MASK_ADC_READ | reg, 0x00);
+            response = AFE_command_get_response(spi_master[0]);
+            ESP_LOGI(TAG_AFE_TEST, "Register 0x%x has value 0x%x", reg, response);
+            
+            
+        }
+        vTaskDelay(10000/portTICK_PERIOD_MS);
+    }
+    
+}
+
+void TEST_readConfig()
+{
+    queue_image = xQueueCreate(300, sizeof(AFE_data_t));
+    //xTaskCreatePinnedToCore(TEST_Task_peekDataRaw, "Task_peekDataRaw", 3000, NULL, 6, &Handle_TEST_Task_peekData, 0);
+    xTaskCreatePinnedToCore(TEST_TASK_readconfig, "Task_readConfig", 3000, NULL, 3, &Handle_TEST_Task_readConfig, 0);
+    xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
+
 }

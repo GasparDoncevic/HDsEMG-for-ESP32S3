@@ -25,14 +25,15 @@
 #define FORMAT0_pin     GPIO_NUM_17
 #define FORMAT1_pin     GPIO_NUM_18
 #define RESET_pin       GPIO_NUM_21
-#define CONTROL_MODE_pin    GPIO_NUM_36
+#define CONTROL_MODE_pin    GPIO_NUM_16
 #define MCLK_pin      GPIO_NUM_20
 //#define XTAL_2_pin      GPIO_NUM_21
 
 
 //Configuirations for the clock source for the AFE
-#define SPI_DATA_CLK 10000000 // 16MHz The maximum possible SCLK for the AFE is 10MHz, derived from minimum T_SCLK of 100ns
-#define AFE_MCLK 32000000 // 32 MHz
+#define SPI_DATA_CLK 16000000 // 16MHz The maximum possible SCLK for the AFE is 10MHz, derived from minimum T_SCLK of 100ns
+#define AFE_MCLK 20000000 //20MHz works, i suspect it is because the APB clock is 80MHz and is a result of easy division, so does 40MHz lmao
+/**< the frequency needs to be a a quotient of 80MHz which is the APB clock*/
 
 // Configurations for the AFE subsystem
 #define TEST_GEN_ODR 1
@@ -51,6 +52,10 @@
 #define ADDRESS_ADC_GPIO_CONTROL 0x0E // Contains UGPIO_enable, GPIOE4_FILTER, GPIOE3_MODE3,GPIOE2_MODE2, GPIOE1_MODE1, GPIO0_MODE0
 #define ADDRESS_ADC_GPIO_WRITE 0x0F  // Write states for the five GPIO pins
 #define ADDRESS_ADC_GPIO_READ  0x10 // Reads state from the 5 GPIO pins 
+#define ADDRESS_ADC_PRCHRG_BUF03 0x11 // Precharge buffer for channels 0-3
+#define ADDRESS_ADC_PRCHRG_BUF47 0x12 // Precharge buffer for channels 4-7
+#define ADDRESS_ADC_DIAG_RX_SEL 0x56 // Diagnostic receiver select
+#define ADDRESS_ADC_DIAG_CTRL 0x57 // Diagnostic control
 //ADC REGISTER ADDRESSES
 
 //ADC REGISTER MASKS, Datasheet of the AD7761 needs to be checked to verify which bit control which feature
