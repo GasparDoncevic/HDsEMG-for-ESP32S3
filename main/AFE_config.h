@@ -32,7 +32,7 @@
 
 //Configuirations for the clock source for the AFE
 #define SPI_DATA_CLK 16000000 // 16MHz The maximum possible SCLK for the AFE is 10MHz, derived from minimum T_SCLK of 100ns
-#define AFE_MCLK 20000000 //20MHz works, i suspect it is because the APB clock is 80MHz and is a result of easy division, so does 40MHz lmao
+#define AFE_MCLK 8000000 //20MHz works, i suspect it is because the APB clock is 80MHz and is a result of easy division, so does 40MHz lmao
 /**< the frequency needs to be a a quotient of 80MHz which is the APB clock*/
 
 // Configurations for the AFE subsystem

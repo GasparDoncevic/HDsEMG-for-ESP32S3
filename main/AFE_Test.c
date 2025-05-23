@@ -184,7 +184,7 @@ void Task_TEST_loopback_sender()
     bool use_command = false;
     spi_transaction_t data_spi2;
     memset(&data_spi2, 0, sizeof(spi_transaction_t));
-    uint8_t data[2] = {0x04, 0x04};
+    uint8_t data[2] = {0x55, 0x44};
     data_spi2.length = 16;
     data_spi2.tx_buffer = &data;
     data_spi2.rx_buffer = NULL;
@@ -193,16 +193,16 @@ void Task_TEST_loopback_sender()
     {   
         if(use_command == false)
         {
-            ESP_LOGI(TAG_AFE_TEST, "Sending data via spi on master device");
+            ESP_LOGI(TAG_AFE_TEST, "Sending data via spi on master device: 0x21");
             spi_device_transmit(spi_master[0], &transaction_mock);
-            vTaskDelay(500/portTICK_PERIOD_MS);
-            data[1]++;
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+            
         }else
         {
             ESP_LOGI(TAG_AFE_TEST, "Sending command via command API");
             AFE_Send_Command(spi_master[0], NO_RETRY, data[0], data[1]);
-            vTaskDelay(500/portTICK_PERIOD_MS);
-            data[1]++;
+            vTaskDelay(1000/portTICK_PERIOD_MS);
+            
         }
         
     }
@@ -315,14 +315,6 @@ void TEST_GPtimer()
     return;
 }
 
-void TEST_AFE_subsystem()
-{
-        // Setting up test resources
-        memset(&data_mock, 0x03, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
-        // Setting up test resources
-        xTaskCreatePinnedToCore(Task_init_AFE_tasks, "AFE_init_tasks", 3000, NULL, configMAX_PRIORITIES-2, &Handle_Task_AFE_init_tasks, 1);
-     return;   
-}
 
 void TEST_AFE_commands()
 {
@@ -458,15 +450,23 @@ void TEST_Task_peekDataRaw()
 
     for (;;)
     {
-        if (ESP_FAIL == xQueuePeek(queue_AFE_data, &data, 0)) vTaskDelay(500/portTICK_PERIOD_MS);
+        if (pdFALSE == xQueuePeek(queue_AFE_data, &data, portMAX_DELAY)){
+			ESP_LOGE(TAG_AFE_TEST, "Failed to peek data from AFE data queue");
+			vTaskDelay(500/portTICK_PERIOD_MS);
+		} 
         else
         {
-            ESP_LOGI(TAG_AFE_TEST, "Peeked data from image queue");
-            for (uint8_t i = 0; i < sizeof(image_data_raw_t); i++)
+			if (data == NULL){
+				ESP_LOGE(TAG_AFE_TEST, "Peeked at NULL data in AFE data queue");
+				vTaskDelay(500/portTICK_PERIOD_MS);
+				continue;
+			}
+            ESP_LOGI(TAG_AFE_TEST, "Peeked data from AFE data queue");
+            for (uint8_t i = 0; i < (AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); i++)
             {
-                ESP_LOGI(TAG_AFE_TEST, "Data is 0x%x", data->data[i]);
+                ESP_LOGI(TAG_AFE_TEST, "Unprocessed AFE Data is 0x%x", data->data[i]);
             }
-            vTaskDelay(100/portTICK_PERIOD_MS);
+            vTaskDelay(200/portTICK_PERIOD_MS);
         }
     }
 }
@@ -489,7 +489,8 @@ void TEST_Task_popImgData()
 
     for (;;)
     {
-        if (ESP_FAIL == xQueueReceive(queue_image, &data, portMAX_DELAY)){
+        if (pdFALSE == xQueueReceive(queue_image, &data, portMAX_DELAY)){
+			ESP_LOGE(TAG_AFE_TEST, "Failed to recieve data from image queue");
             vTaskDelay(500/portTICK_PERIOD_MS);
         }
         else
@@ -504,9 +505,10 @@ void TEST_Task_popImgData()
             ESP_LOGI(TAG_AFE_TEST, "Data size is  %d", data->data[0]);
             for (uint8_t i = 1; i < (sizeof(image_data_raw_t)); i+=2)
             {
-                data_img = (data->data[i])<<8 | data->data[i+1];
-                ESP_LOGI(TAG_AFE_TEST, "Data is 0x%x", data_img);
+                data_img = ((data->data[i])<<8) | (data->data[i+1]);
+                ESP_LOGI(TAG_AFE_TEST, "Processed Data is 0x%x", data_img);
             }
+			free(data);
             //vTaskDelay(50/portTICK_PERIOD_MS);
         }
     }
@@ -557,4 +559,62 @@ void TEST_readConfig()
     xTaskCreatePinnedToCore(TEST_TASK_readconfig, "Task_readConfig", 3000, NULL, 3, &Handle_TEST_Task_readConfig, 0);
     xTaskCreatePinnedToCore(Task_AFE_init, "Task_AFE_Init", 4000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init, 1);
 
+}
+
+/**
+ * @fn TEST_AFE_subsystem
+ * 
+ * @brief 	starts all og the tasks for testing the AFE subsystem
+ *
+ * @details all of the AFE tasks are created and the AFE subsystem is initialized. The function also creates the tasks for sending and recieving data from the SPI master and slave
+ * 			which are used for testing the AFE subsystem. The function also creates a task for peeking at the raw data before it is removed by the staging task and a task for popping the image data
+ * 			after it has been staged.
+ * 
+ * @note 	for this test ADC config and command sending should be disabled in the AFE subsystem (or commented out), the master and slave are connected to eachother
+ * 			so the command size of 2 bytes may confuse the rest of the AFE subsystem, because it expects predetermined data size.  
+ */
+void TEST_AFE_subsystem()
+{
+	queue_image = xQueueCreate(300, sizeof(AFE_data_t));
+	int created_tasks = 0;
+	// Setting up test resources
+	memset(&data_mock, 0x02, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET); 
+
+	// setting up SPI slave to recieve data and commands from master SPI
+	if (pdPASS ==  xTaskCreatePinnedToCore(TEST_Task_peekDataRaw, "Pop_dataRaw", 3000, NULL, PRIORITY_TASK_STAGE_DATA, &Handle_TEST_Task_peekData, 0)){
+		created_tasks++;
+	}else{
+		ESP_LOGE(TAG_AFE_TEST, "Failed to create Task Pop_dataRaw");
+	}
+	if (pdPASS == xTaskCreatePinnedToCore(TEST_Task_popImgData, "Pop_ImgData", 3000, NULL, PRIORITY_TASK_GET_DATA, &Handle_TEST_Task_popImgData, 0)){
+		created_tasks++;
+	}else{
+		ESP_LOGE(TAG_AFE_TEST, "Failed to create Task Pop_ImgData");
+	}
+	// setting up SPI master to send data and commands to slave SPI
+	if (pdPASS == xTaskCreatePinnedToCore(Task_TEST_loopback_sender, "Sender", 3000, NULL, PRIORITY_TASK_SEND_CMD, &Handle_Task_TEST_loopback_sender, 0)){
+		created_tasks++;
+	}else{
+		ESP_LOGE(TAG_AFE_TEST, "Failed to create Task Sender");
+	}
+	// initializing AFE subsystem
+	if (pdPASS == xTaskCreatePinnedToCore(Task_init_AFE_tasks, "AFE_init_tasks", 3000, NULL, configMAX_PRIORITIES-2, &Handle_Task_AFE_init_tasks, 1)){
+		created_tasks++;
+	}else{
+		ESP_LOGE(TAG_AFE_TEST, "Failed to create Task AFE_init_tasks");
+	}
+	if (created_tasks != 4)
+	{
+		ESP_LOGE(TAG_AFE_TEST, "All tasks were NOT created successfully. Number of created tasks %d", created_tasks);
+		ESP_LOGE(TAG_AFE_TEST, "Deleting created tasks");
+		if (Handle_Task_AFE_init_tasks != NULL) vTaskDelete(Handle_Task_AFE_init_tasks);
+		if (Handle_TEST_Task_peekData != NULL) vTaskDelete(Handle_TEST_Task_peekData);
+		if (Handle_TEST_Task_popImgData != NULL) vTaskDelete(Handle_TEST_Task_popImgData);
+		if (Handle_Task_TEST_loopback_sender != NULL) vTaskDelete(Handle_Task_TEST_loopback_sender);
+		ESP_LOGE(TAG_AFE_TEST, "Deleted all tasks and resources and retrying");
+		return;
+	}
+	
+	ESP_LOGI(TAG_AFE_TEST, "Created %d of 4 tasks for AFE subsystem test", created_tasks);
+	return;
 }

@@ -161,7 +161,7 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
     uint8_t cmd_attempts_ADC = 0;
 	uint8_t num_of_retries = 10;
 
-    ESP_LOGD(TAG_AFE, "Sending data 0x%x", (int)(command[0]<<8 | command[1]));
+    //ESP_LOGD(TAG_AFE, "Sending data 0x%x", (int)(command[0]<<8 | command[1]));
 
     // Implemeted a retry-pattern which is optional defined by passed function parameter
     do 
@@ -173,17 +173,23 @@ esp_err_t AFE_Send_Command(spi_device_handle_t spi_device, retry will_retry, uin
             return ESP_FAIL;
         }
         cmd_attempts_ADC++;
-        ESP_LOGV(TAG_AFE, "Transmitting command");
+        //ESP_LOGV(TAG_AFE, "Transmitting command");
         
         result = spi_device_transmit(spi_device, &transaction_command);
         
-        ESP_LOGV(TAG_AFE, "Command sent");
+        //ESP_LOGV(TAG_AFE, "Command sent");
 
         //Checking to see if retrying failed commands is enabled
         if (RETRY == will_retry) response = AFE_command_get_response(spi_device);
     }while((uint16_t)ADC_ERROR_CODE == (uint16_t)(response) || (RETRY == will_retry && ((uint8_t)(command[1]) != (uint8_t)(response))));
 
-    if(ESP_OK != result) ESP_LOGE(TAG_AFE, "SPI command failed");
+    if(ESP_OK != result)
+	{
+		ESP_LOGE(TAG_AFE, "SPI command failed");
+	} 
+	else{
+		ESP_LOGD(TAG_AFE, "SPI command sent");
+	}
 
     return result;
 
@@ -500,13 +506,24 @@ esp_err_t AFE_config_set_diag(spi_device_handle_t spi_master_dev)
 {
     esp_err_t result;
     /** Setting all channels to diagnostic mode */
-    if (ESP_FAIL == (result = AFE_Send_Command(spi_master_dev, RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_DIAG_RX_SEL, (uint8_t) 0x0F)))
+    if (ESP_FAIL == (result = AFE_Send_Command(spi_master_dev, RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_DIAG_RX_SEL, (uint8_t) 0xFF)))
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for channel diagnostic mode");
 
     if(ESP_FAIL == (result = AFE_Send_Command(spi_master_dev, RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_DIAG_CTRL, (uint8_t) 0b00000011)))
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for diagnostic mode control");
 
     return result;
+}
+
+uint16_t AFE_get_chipStatus(spi_device_handle_t spi_master_dev)
+{
+	esp_err_t result;
+	uint16_t status = 0;
+	if (ESP_FAIL == (result = AFE_Send_Command(spi_master_dev, NO_RETRY, (uint8_t) MASK_ADC_READ|ADDRESS_ADC_CHIP_STATUS, 0x00)))
+		ESP_LOGE(TAG_AFE, "Failed to request chip status");
+	status = AFE_command_get_response(spi_master_dev);
+
+	return status;
 }
 
 //This is the function where the ADC daisy-chain configuration should be done
@@ -550,6 +567,15 @@ esp_err_t AFE_config()
         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_CHANNEL_MODE_SEL,(uint8_t) MASK_ADC_CMSR_ALL_A)))
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for channel mode select");
 
+		/* // Setting the GPIO4/FILTER pin to 1 to enable external crystal oscillator
+		if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_GPIO_CONTROL,(uint8_t) 0x90)))
+			ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for GPIO control");
+		
+		//Sending command for GPIO control
+		if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_GPIO_WRITE,(uint8_t) 0x10)))
+			ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for GPIO control");
+		 */	
+
         //Sending command for power mode
         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t)MASK_ADC_WRITE|ADDRESS_ADC_POWER_MODE,(uint8_t) MASK_ADC_PWR_MODE_LOW|MASK_ADC_LVDS_DIS|MASK_ADC_MCLK_DIV_32)))
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for power mode");
@@ -562,11 +588,11 @@ esp_err_t AFE_config()
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for data control");
 
         //Sending command for interface config
-         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG,(uint8_t) 0x00|MASK_ADC_IC_DCLK_DIV_4)))
+         if (ESP_FAIL == (result = AFE_Send_Command(spi_master[device], RETRY, (uint8_t) MASK_ADC_WRITE|ADDRESS_ADC_INTERFACE_CONFIG,(uint8_t) 0x00|MASK_ADC_IC_DCLK_DIV_8)))
             ESP_LOGE(TAG_AFE, "ADC_Config: Failed to send command for interface config");
 
         //Setting gain register values
-        AFE_config_set_gain(spi_master[device], 0x77);
+        AFE_config_set_gain(spi_master[device], 0x56);
 
         AFE_config_set_diag(spi_master[device]);
         
@@ -617,17 +643,21 @@ void Task_AFE_init()
     //Initializing RTC for AFE CLK
     AFE_config_clk_source();
 
-    
+    //Enable pull-ups on SPI lines so we don't detect rogue pulses when no master is connected.
+    //gpio_set_pull_mode(SPI_SLAVE_MOSI, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(SPI_SLAVE_CLK, GPIO_PULLUP_ONLY);
+    gpio_set_pull_mode(SPI_SLAVE_CS0, GPIO_PULLUP_ONLY);
 
     //initializing  buses
     ESP_LOGI(TAG_AFE, "Starting SPI init");
     //Initializing slave bus ADC daisy-chain data
-    bus_spi_slave.miso_io_num = -1;
+    bus_spi_slave.miso_io_num = SPI_SLAVE_MISO;
     bus_spi_slave.mosi_io_num = SPI_SLAVE_MOSI;
     bus_spi_slave.sclk_io_num = SPI_SLAVE_CLK;
     bus_spi_slave.isr_cpu_id = ESP_INTR_CPU_AFFINITY_1; // The spi slave triggers interrupts only for core 1, which handles AFE controll
     bus_spi_slave.max_transfer_sz = AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET;
 	bus_spi_slave.flags = 0;
+	
 
     ESP_LOGI(TAG_AFE, "Configured SPI slave bus");
     ESP_LOGI(TAG_AFE, "SPI slave can handle a length of %d bits", bus_spi_slave.max_transfer_sz * 8);
@@ -636,8 +666,8 @@ void Task_AFE_init()
     device_spi_slave.spics_io_num = SPI_SLAVE_CS0;
     device_spi_slave.queue_size = SIZE__SPI_SLAVE_QUEUE;
     device_spi_slave.flags = 0;
-    device_spi_slave.post_setup_cb = slave_post_setup_cb;
-    device_spi_slave.post_trans_cb = slave_post_trans_cb;
+    device_spi_slave.post_setup_cb = NULL;
+    device_spi_slave.post_trans_cb = NULL;
     
 
     esp_err_t ret;
@@ -674,7 +704,7 @@ void Task_AFE_init()
         (device_spi_master[device]).clock_speed_hz = SPI_DATA_CLK;
         (device_spi_master[device]).mode = 0;
         (device_spi_master[device]).spics_io_num = spi_master_CS_pins[device];
-        (device_spi_master[device]).queue_size = 10;
+        (device_spi_master[device]).queue_size = SIZE__SPI_SLAVE_QUEUE;
         (device_spi_master[device]).duty_cycle_pos = 128;
         (device_spi_master[device]).cs_ena_posttrans = 3;
         (device_spi_master[device]).command_bits = 0;
@@ -722,6 +752,28 @@ void Task_AFE_init()
 
 }
 
+/**
+ * @fn	DBG_print_spi_data
+ * 
+ * @brief This func prints the data located in the rx buffer of a spi_slave_transaction. SHould not be ised in ISRs
+ * 
+ * 
+ */
+void DBG_print_spi_data(void * data)
+{
+	uint32_t size_data = sizeof(AFE_data_t);
+	uint8_t num_channel = size_data/AFE_SIZE_DATA_PACKET;
+	ESP_LOGD(TAG_AFE, "The size of expected AFE data is %lu", size_data);
+	for(uint16_t channel = 0; channel < num_channel; channel++)
+	{
+		ESP_LOGD(TAG_AFE, "The data from channel %u: 0x%lX", channel, (uint32_t)((*(uint8_t*)(data+channel*AFE_SIZE_DATA_PACKET) <<16) | 
+																			(*(uint8_t*)(data+1+channel*AFE_SIZE_DATA_PACKET) <<8) | 
+																			(*(uint8_t*)(data+2+channel*AFE_SIZE_DATA_PACKET))));
+	}
+	
+
+}
+
 // This task handles transaction creation andtransaction results
 // This is seems like a very bad solution to creating a buch of transactions allocating it's data
 // At this point this looks like the only way not to burst the memory budget and balance out execution time
@@ -739,9 +791,11 @@ void Task_AFE_get_data()
     spi_slave_transaction_t *transactions[num_transactions];
     uint16_t transaction = 0;
     spi_slave_transaction_t *transaction_result = NULL;
-    AFE_data_t *recieved_data;
+    AFE_data_t recieved_data = {0};
     bool is_data_valid = true;
     AFE_data_t *pdata;
+	uint16_t size_data = sizeof(AFE_data_t);
+	uint16_t reg_status = 0;
     //vTaskDelay(1000/portTICK_PERIOD_MS);
     // This portion of the code handles the creation of the slave transactions
     // This is done in advance in order to save time 
@@ -755,32 +809,24 @@ void Task_AFE_get_data()
 			i--;
 			continue;
 		}
-	}
-	
-
-    ESP_LOGD(TAG_AFE, "Creating transactions of length %d bits", AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8);
-    for(uint16_t i = 0; i < num_transactions; i++)
-    {
-        if (NULL == (pdata = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET)))
+        if (NULL == (pdata = heap_caps_malloc(size_data, MALLOC_CAP_DMA)))
         {
             ESP_LOGE(TAG_AFE, "Failed to allocate memory for transaction %d data", i);
             vTaskDelay(100/portTICK_PERIOD_MS);
             i--;
+			free(transactions[i]);
             continue;
         }
-        memset(pdata, 0x00, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
+        memset(pdata, 0x00, size_data);
 
         transactions[i]->flags = 0;
         transactions[i]->tx_buffer = NULL;
         transactions[i]->length = (size_t) AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8;
         transactions[i]->rx_buffer = pdata;
-        
-        
     }
+	ESP_LOGD(TAG_AFE, "Creating transactions of length %d bits", AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET*8);
     
-    
-    // Allocating memory for a lot of transactions
-    // TODO: add malloc call for each new recieved data to copy to queue
+
     uint8_t transaction_queues_busy = 0;
     for(;;)
     {
@@ -819,31 +865,47 @@ void Task_AFE_get_data()
                 transaction_queues_busy++;
                 break; 
             }
-            ESP_LOGD(TAG_AFE, "Recieved data from transaction. Data from spi_buf 0x%x", *((uint16_t *)(transaction_result->rx_buffer)));
-            ESP_LOGD(TAG_AFE, "First data point in image before flip 0x%lx", (uint32_t)(0ul | *((uint32_t*)(transaction_result->rx_buffer))));
-            recieved_data = (AFE_data_t *)(transaction_result->rx_buffer);
+			if(NULL == transaction_result->rx_buffer)
+			{
+				ESP_LOGW(TAG_AFE, "SPI transaction returns a NULL pointer, check memory");
+				continue; /**< skippng transaction if a bad transaction was given by SPI driver */
+			}
+			memcpy(&recieved_data, transaction_result->rx_buffer, size_data); /**< storing data before logging to avoid changes in behaviour due to active logging level*/
+			//ESP_LOGD(TAG_AFE, "Recieved transaction AFE data loc %p \n data 0x%X", transaction_result->rx_buffer, ((void *)(transaction_result->rx_buffer));
+            ESP_LOGD(TAG_AFE, "Recieved data from transaction. Data from spi_buf 0x%x on location %p", (*(AFE_data_t*)(transaction_result->rx_buffer)).data[0], transaction_result->rx_buffer);
+			DBG_print_spi_data(transaction_result->rx_buffer);
+            //ESP_LOGD(TAG_AFE, "First data point in image before flip 0x%lx", (uint32_t)(0ul | *((uint32_t*)(transaction_result->rx_buffer))));
+            //recieved_data = (AFE_data_t *)(transaction_result->rx_buffer);
             //reverseN_bytes((uint8_t *)recieved_data, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
-            ESP_LOGD(TAG_AFE, "Recieved data from transaction. Data from stored pointer 0x%x on location 0x%x", (uint16_t)(recieved_data->data[1]), (unsigned int)recieved_data);
-            ESP_LOGD(TAG_AFE, "First data point in image after flip 0x%lx", (uint32_t)(0ul | recieved_data->data[0] << 16 | recieved_data->data[1] << 8 | recieved_data->data[2]));
+            //ESP_LOGD(TAG_AFE, "First data point from stored data 0x%X", (uint16_t)((recieved_data.data[1] << 8)| recieved_data.data[2]));
+            //ESP_LOGD(TAG_AFE, "First data point in image after flip 0x%lx", (uint32_t)(0ul | recieved_data->data[0] << 16 | recieved_data->data[1] << 8 | recieved_data->data[2]));
             
             // Checking  the header only for the first channel of an ADC, to verify if each ADC operates correctly
             for(uint8_t header = 0; header < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; header += AFE_SIZE_DATA_PACKET*AFE_NUM_OF_ADC_CH)
             {
-                if ((0xE0 & recieved_data->data[header]) != 0){
+                if ((0xE0 & recieved_data.data[header]) != 0){
                   //  ESP_LOGE(TAG_AFE, "Data packet has an error flag raised, has unsettled filter or repeated data, dropping whole image data");
                   //  ESP_LOGE(TAG_AFE, "header recieved is 0x%x with data 0x%x ", recieved_data->data[header], (uint16_t)(recieved_data->data[header+1] << 8)|recieved_data->data[header+2]);
-                    if ( 0 != (0x08 & recieved_data->data[header]))
+                    if ( 0 != (0x08 & recieved_data.data[header]))
                     {
                         ESP_LOGW(TAG_AFE, "Data packet has an saturated filter flag raised");
                     }
                     
-                    if ((0x80 & recieved_data->data[header]) != 0)
+                    if ((0x80 & recieved_data.data[header]) != 0)
                     {
                         ESP_LOGE(TAG_AFE, "Error bit set, the ADC might have rejected the clock");
                         /* FLG_Config_done = 0;
                         AFE_reset(false);
-                        AFE_config();
-                        break; */
+						vTaskDelay(2/portTICK_PERIOD_MS);
+                        AFE_config(); */
+						reg_status = AFE_get_chipStatus(spi_master[0]);
+						if (0 != (0x8 && reg_status)){
+							ESP_LOGE(TAG_AFE, "ADC has a chip error");
+						}
+						if (0 != (0x4 && reg_status)){
+							ESP_LOGE(TAG_AFE, "ADC has a no clock error");
+						}			
+                        break;
                     }
                     
                     bad_data_counter++;
@@ -852,6 +914,7 @@ void Task_AFE_get_data()
                         ESP_LOGE(TAG_AFE, "Too many bad data packets, resetting AFE");
                         FLG_Config_done = 0;
                         AFE_reset(false);
+						vTaskDelay(2/portTICK_PERIOD_MS);
                         AFE_config();
                         bad_data_counter = 0;
                     }
@@ -859,20 +922,20 @@ void Task_AFE_get_data()
                     is_data_valid = false;
                     break;
                 }
-                ESP_LOGI(TAG_AFE, "Header flags of ADC data: \n 0x%x \n 0x%x", (uint8_t)recieved_data->data[header], (uint8_t)recieved_data->data[header+5]);
             }
             
             //ESP_LOGI(TAG_AFE, "Sending data to queue");
             AFE_data_t *data = pvPortMalloc(sizeof(AFE_data_t));
+			
             ESP_LOGD(TAG_AFE, "Storing data on memory location %p", data);
-            if (NULL != data || NULL != recieved_data)
+            if (NULL != data)
             {
-                memcpy(data, recieved_data, sizeof(AFE_data_t));
-                recieved_data = NULL;
+				//reverseN_bytes(recieved_data.data, AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*2);
+                memcpy(data, &recieved_data, sizeof(AFE_data_t));
                 //transactions[transaction].rx_buffer = malloc(AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET);
-                ESP_LOGI(TAG_AFE, "Sending data to queue");
                 if(is_data_valid == true)
                 {
+					ESP_LOGI(TAG_AFE, "Sending data to queue");
                     if (pdFALSE == xQueueSend(queue_AFE_data, &data, 0))
                     {
                         ESP_LOGE(TAG_AFE, "Error in sending data to queue_AFE_data. items in queue: %d \n Data is being missed", uxQueueMessagesWaiting(queue_AFE_data));
@@ -885,7 +948,7 @@ void Task_AFE_get_data()
         }
         // If both enqueueing and dequeueing a transaction failed, a preparation and processing fo transactions will be paused
         // for 30ms which estimates around is 60 transactions 
-        if(transaction_queues_busy == 2) vTaskDelay(60/portTICK_PERIOD_MS);
+        if(transaction_queues_busy == 2) vTaskDelay(30/portTICK_PERIOD_MS);
         //vTaskDelay(1000/portTICK_PERIOD_MS);
     }
 
@@ -898,6 +961,20 @@ void Task_AFE_stage_data()
     AFE_data_t *unparsed_data = NULL;
     image_data_raw_t image_filtered;
 
+	// preallocating memory for staged image circular buffer buffer
+	/*  uint8_t size_staged_image_buf = 100;
+	 image_data_raw_t *buf_staged_image[size_staged_image_buf];
+	 uint8_t buf_staged_image_head = 0;
+	 uint8_t buf_staged_image_tail = 0;
+	 
+	 for(uint8_t i = 0; i < size_staged_image_buf; i++){
+	 		buf_staged_image[i] = pvPortMalloc(sizeof(image_data_raw_t));
+	 		if (NULL == buf_staged_image[i]){
+	 			ESP_LOGE(TAG_AFE, "Failed to allocate memory for staged image buffer, retrying");
+	 			i--;
+	 		} 
+	 } */
+	 
     vTaskDelay(1000/portTICK_PERIOD_MS);
     for(;;)
     {
@@ -909,7 +986,7 @@ void Task_AFE_stage_data()
         // The format od the unparsed data is 1 byte header and 2 bytes data
         for(uint16_t byte = 1; byte < AFE_NUM_OF_ADC*AFE_NUM_OF_ADC_CH*AFE_SIZE_DATA_PACKET; byte+=3)
         {
-            image_filtered.data[image_point] = unparsed_data->data[byte] << 8 | unparsed_data->data[byte+1];
+            image_filtered.data[image_point] = (unparsed_data->data[byte+1] << 8) | (unparsed_data->data[byte]);
             image_point++;
         }
         ESP_LOGV(TAG_AFE, "freeing unparsed data");
@@ -962,7 +1039,7 @@ void Task_init_AFE_tasks()
             ESP_LOGE(TAG_AFE, "Deleted all tasks and resources and retrying");
             continue; // placing continue here to retry creating all of the tasks
         }
-
+		ESP_LOGI(TAG_AFE, "All AFE were tasks created successfully");
         vTaskDelete(NULL);
     }
 

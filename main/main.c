@@ -797,6 +797,7 @@ void app_main(void)
     //TEST_listen();
     TEST_dataChain();
     //TEST_readConfig();
+	//TEST_AFE_subsystem();
 
     //xTaskCreatePinnedToCore(TEST_core_data_transfer_init, "Test_core_transfer", 3000, NULL, configMAX_PRIORITIES-1, &Handle_Task_AFE_init_tasks, 0);
     
